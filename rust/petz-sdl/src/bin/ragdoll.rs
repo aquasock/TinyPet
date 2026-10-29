@@ -244,9 +244,11 @@ fn build() -> (Ragdoll, Creature) {
     let mut ear_balls: Vec<usize> = Vec::new();
     for side in [-1.0f32, 1.0] {
         let ear = r.add(Particle::new(378.0, base_y - 58.0, 10.0, EAR));
+        // Pinned: the pair is placed as a billboard every frame, so a spring has
+        // nothing to do and would only pull the head about.
+        r.particles[ear].pinned = true;
         r.particles[ear].side = 10.0 * side;
         r.particles[ear].rest_side = 10.0 * side;
-        r.link(skull, ear);
         ear_balls.push(ear);
     }
 
@@ -504,6 +506,28 @@ impl Walker {
         }
         let skull_now = doll.particles[creature.skull].pos;
         let skull_rest = rest.head[0];
+        // Ears are placed as a pair separated along the *screen's* horizontal,
+        // not the body's lateral axis. A body-lateral offset turns into depth as
+        // the animal turns, and depth is what the pitched view converts into
+        // height - which is why the two ears sat at different heights in
+        // profile. Separated along world x they share a depth, so they share a
+        // height at every heading.
+        {
+            let sk = doll.particles[creature.skull].pos;
+            let h = self.heading_body;
+            const SEP: f32 = 10.0;
+            for (k, &ear) in creature.ears.iter().enumerate() {
+                let s = if k == 0 { -1.0 } else { 1.0 };
+                // Body coordinates that come out as a pure world-x offset.
+                let bx = sk.x - 8.0 + s * SEP * h.sin();
+                let by = sk.y - 30.0;
+                doll.drag_to(ear, Vec2::new(bx, by));
+                if let Some(p) = doll.particles.get_mut(ear) {
+                    p.side = s * SEP * h.cos();
+                }
+            }
+        }
+
         for &(sclera, iris, y, sign) in &creature.eye_parts {
             // On the head's surface at the chosen angle, so widening the eyes
             // walks them round the skull instead of through it.
@@ -1548,6 +1572,40 @@ mod walk_tests {
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
         assert_eq!(c.head.len(), 9, "skull, muzzle, nose, two ears, four eyes");
         assert_eq!(doll.particles.len(), 29, "total ball count");
+    }
+
+    #[test]
+    fn the_two_ears_share_a_screen_height() {
+        // Reported from play: at 90 degrees the ears did not line up. Their
+        // separation is along world x, which is the screen's horizontal, so both
+        // have the same depth and therefore the same height at every heading.
+        let view = View::new(25.0, GROUND);
+        for deg in [0.0f32, 45.0, 90.0, 135.0, 180.0, 270.0] {
+            let (mut doll, c, rest, mut w) = rig();
+            w.body.heading = deg.to_radians();
+            w.heading_body = w.body.heading;
+            for f in w.facing.iter_mut() {
+                *f = w.body.heading;
+            }
+            for _ in 0..120 {
+                w.pose(&mut doll, &c, &rest);
+                doll.step(1.0 / 120.0);
+            }
+            let ys: Vec<f32> = c
+                .ears
+                .iter()
+                .map(|&e| {
+                    let p = &doll.particles[e];
+                    let b = Body { pos: w.body.pos, heading: w.body.heading };
+                    view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y)).y
+                })
+                .collect();
+            assert!(
+                (ys[0] - ys[1]).abs() < 0.5,
+                "at {deg} degrees the ears differ in height by {:.1} px",
+                (ys[0] - ys[1]).abs()
+            );
+        }
     }
 
     #[test]
