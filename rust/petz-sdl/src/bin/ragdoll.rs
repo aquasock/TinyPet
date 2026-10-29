@@ -249,6 +249,10 @@ fn build() -> (Ragdoll, Creature) {
         let base = r.add(Particle::new(378.0, base_y - 58.0, 9.0, EAR));
         let tip = r.add(Particle::new(374.0, base_y - 76.0, 6.0, EAR_TIP));
         for i in [base, tip] {
+            // Pinned and placed exactly, like the eyes. Left to the solver they
+            // settled a couple of pixels apart, so the two tips leaned in
+            // different directions.
+            r.particles[i].pinned = true;
             r.particles[i].side = 10.0 * side;
             r.particles[i].rest_side = 10.0 * side;
             // Ears sit on the head, so they are drawn as if a little nearer.
@@ -540,12 +544,12 @@ impl Walker {
             for &(base, tip, sign) in &creature.ears {
                 let bx = sk.x + self.ear_radius * self.ear_angle.sin();
                 let by = sk.y - self.ear_radius * self.ear_angle.cos();
-                doll.drive_to(base, Vec2::new(bx, by), 0.6);
+                doll.drag_to(base, Vec2::new(bx, by));
                 // The tip leans back and up from the base, then sinks into it.
                 let (mut tx, mut ty) = (bx - 4.0, by - 18.0);
                 tx += self.ear_sink * (bx - tx);
                 ty += self.ear_sink * (by - ty);
-                doll.drive_to(tip, Vec2::new(tx, ty), 0.6);
+                doll.drag_to(tip, Vec2::new(tx, ty));
                 for i in [base, tip] {
                     if let Some(p) = doll.particles.get_mut(i) {
                         p.side = sign * 10.0;
@@ -1657,6 +1661,30 @@ mod walk_tests {
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
         assert_eq!(c.head.len(), 11, "skull, muzzle, nose, four ear and four eye balls");
         assert_eq!(doll.particles.len(), 31, "total ball count");
+    }
+
+    #[test]
+    fn the_two_ears_are_mirror_images() {
+        // Reported from play: the two tips leaned in different directions. The
+        // ears were being driven at 0.6 per step and then shoved by the solver,
+        // which settled them a couple of pixels apart. They are pinned now and
+        // placed exactly.
+        let (mut doll, c, rest, mut w) = rig();
+        for _ in 0..180 {
+            w.pose(&mut doll, &c, &rest);
+            doll.step(1.0 / 120.0);
+        }
+        let (b0, t0, _) = c.ears[0];
+        let (b1, t1, _) = c.ears[1];
+        for (name, a, b) in [("base", b0, b1), ("tip", t0, t1)] {
+            let (pa, pb) = (doll.particles[a].pos, doll.particles[b].pos);
+            assert!(
+                pa.sub(pb).length() < 0.01,
+                "{name} positions differ: {pa:?} vs {pb:?}"
+            );
+            let (sa, sb) = (doll.particles[a].side, doll.particles[b].side);
+            assert!((sa + sb).abs() < 0.01 && sa.abs() > 1.0, "{name} sides not mirrored");
+        }
     }
 
     #[test]
