@@ -92,6 +92,10 @@ struct Creature {
     legs: Vec<Leg>,
     head: Vec<usize>,
     tail: Vec<usize>,
+    /// (base, overlay) pairs drawn as one unit: the iris sits on its sclera.
+    eye_overlays: Vec<(usize, usize)>,
+    /// (sclera, side) for each eye, so the one facing away can be culled.
+    eye_sides: Vec<(usize, f32)>,
 }
 
 fn build() -> (Ragdoll, Creature) {
@@ -145,17 +149,22 @@ fn build() -> (Ragdoll, Creature) {
     // pupil whose *outline* is the iris, in a per-breed colour. There is no
     // eyelid ball at all - Petz parameterises the lid instead.
     let mut eyes = Vec::new();
+    let mut overlay_pairs: Vec<(usize, usize)> = Vec::new();
+    let mut eye_sides: Vec<(usize, f32)> = Vec::new();
     for side in [-9.0f32, 9.0f32] {
         let sclera = r.add(Particle::new(392.0, base_y - 32.0, 10.0, SCLERA));
         let iris = r.add(Particle::new(392.0, base_y - 31.0, 6.0, IRIS));
         for i in [sclera, iris] {
             r.particles[i].side = side;
+            r.particles[i].rest_side = side;
         }
         r.particles[iris].rim = IRIS_RING;
         r.particles[iris].layer = 1;
         r.link(skull, sclera);
         eyes.push(sclera);
         eyes.push(iris);
+        overlay_pairs.push((sclera, iris));
+        eye_sides.push((sclera, side));
     }
 
     let ear_a = r.add(Particle::new(380.0, base_y - 48.0, 9.0, BODY));
@@ -179,6 +188,7 @@ fn build() -> (Ragdoll, Creature) {
         let foot = r.add(Particle::new(fwd, GROUND, 10.0, LIGHT));
         for i in [hip, knee, foot] {
             r.particles[i].side = side;
+            r.particles[i].rest_side = side;
         }
         let attach = if fwd > 300.0 { spine[spine.len() - 2] } else { spine[0] };
         r.link(attach, hip);
@@ -199,11 +209,13 @@ fn build() -> (Ragdoll, Creature) {
 
     // Ears sit either side of the skull.
     r.particles[ear_a].side = -6.0;
+    r.particles[ear_a].rest_side = -6.0;
     r.particles[ear_b].side = 6.0;
+    r.particles[ear_b].rest_side = 6.0;
 
     let mut head = vec![skull, muzzle, nose, ear_a, ear_b];
     head.extend(eyes);
-    (r, Creature { spine, legs, head, tail })
+    (r, Creature { spine, legs, head, tail, eye_overlays: overlay_pairs, eye_sides })
 }
 
 /// The walking controller: owns the clock, the world position, and the pose.
@@ -581,6 +593,8 @@ fn main() -> Result<(), String> {
                     if let Some(i) = grabbed.take() {
                         println!("release ball {i}");
                         doll.particles[i].pinned = false;
+                        // Side is authored, not solved: undo any lateral drag.
+                        doll.restore_sides();
 
                         // The grab moved the skeleton *within* body space, and
                         // the pose drive pulls body space back to rest - which
@@ -697,48 +711,79 @@ fn main() -> Result<(), String> {
             }
         }
 
-        // Depth order within each layer; layers ascend afterwards. The eye
-        // iris lives on layer 1 so it lands on its own sclera no matter what
-        // the depth says.
-        let mut order: Vec<usize> = (0..doll.particles.len()).collect();
-        order.sort_by(|&a, &b| {
-            let (la, lb) = (doll.particles[a].layer, doll.particles[b].layer);
-            la.cmp(&lb).then(
-                screen[b].depth.partial_cmp(&screen[a].depth).unwrap(),
-            )
-        });
+        // Depth order, nothing else. Painting on top unconditionally is how
+        // the eyes ended up showing through the skull when the animal walked
+        // away: the far eye is behind the head, and depth has to decide that.
+        let overlay_of: std::collections::HashMap<usize, usize> =
+            creature.eye_overlays.iter().cloned().collect();
+        let is_overlay = |i: usize| creature.eye_overlays.iter().any(|(_, o)| *o == i);
 
-        // Rim then bodies, per layer. Doing all rims first would let a body in
-        // a lower layer paint over a higher layer's rim - which is exactly what
-        // happened to the iris ring.
-        let max_layer = doll.particles.iter().map(|p| p.layer).max().unwrap_or(0);
-        for layer in 0..=max_layer {
-            for &i in order.iter().filter(|&&i| doll.particles[i].layer == layer) {
-                let p = &doll.particles[i];
-                let r = p.radius.round() as i32;
-                if r < 1 { continue; }
-                let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
-                let rim = if p.rim == 0 { OUTLINE } else { p.rim };
-                fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), rim);
+        // An eye is a ball stuck on the side of the head, so only the one on
+        // the viewer's side can be seen. Depth alone was not enough: the head
+        // is a cluster of overlapping balls, not a solid, so a far eye could
+        // still peek between them. Cull by which way it faces.
+        let mut hidden: Vec<bool> = vec![false; doll.particles.len()];
+        for &(sclera, side) in &creature.eye_sides {
+            let outward_y = -walker.heading_body.sin() * side.signum();
+            // The viewer looks along +y, so an eye faces us when outward y < 0.
+            if outward_y >= -0.05 {
+                hidden[sclera] = true;
+                for &(base, over) in &creature.eye_overlays {
+                    if base == sclera {
+                        hidden[over] = true;
+                    }
+                }
             }
-            for &i in order.iter().filter(|&&i| doll.particles[i].layer == layer) {
-                let p = &doll.particles[i];
+        }
+
+        let mut order: Vec<usize> = (0..doll.particles.len()).collect();
+        order.sort_by(|&a, &b| screen[b].depth.partial_cmp(&screen[a].depth).unwrap());
+
+        // Rims for the body only. An iris rim drawn here would be painted over
+        // by its own sclera, so it is drawn with the pair instead.
+        for &i in order.iter().filter(|&&i| !is_overlay(i) && !hidden[i]) {
+            let p = &doll.particles[i];
+            let r = p.radius.round() as i32;
+            if r < 1 { continue; }
+            let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
+            let rim = if p.rim == 0 { OUTLINE } else { p.rim };
+            fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), rim);
+        }
+
+        let mut draw = |i: usize, surface: &mut Surface| {
+            let p = &doll.particles[i];
+            let r = p.radius.round() as i32;
+            if r < 1 { return; }
+            let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
+            let alt = match p.colour {
+                BODY => LIGHT,
+                LIGHT => BODY,
+                other => other,
+            };
+            let pattern = Pattern {
+                base: ramps.get(&p.colour).cloned().unwrap_or_else(|| Ramp::new(vec![p.colour])),
+                alt: ramps.get(&alt).cloned().unwrap_or_else(|| Ramp::new(vec![alt])),
+                texture: textures[tex_idx].1.clone(),
+                threshold: 128,
+                phase: 0.0,
+            };
+            shade_disc_pattern(surface, &table, cx, cy, (r * 2) as usize, light, &pattern);
+        };
+
+        for &i in order.iter().filter(|&&i| !is_overlay(i) && !hidden[i]) {
+            draw(i, &mut surface);
+            // The pair is atomic: rim, body, then the pupil on top of it. It
+            // still sorts by the sclera's depth, so the head can hide it.
+            if let Some(&over) = overlay_of.get(&i) {
+                let p = &doll.particles[over];
                 let r = p.radius.round() as i32;
-                if r < 1 { continue; }
-                let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
-                let alt = match p.colour {
-                    BODY => LIGHT,
-                    LIGHT => BODY,
-                    other => other,
-                };
-                let pattern = Pattern {
-                    base: ramps.get(&p.colour).cloned().unwrap_or_else(|| Ramp::new(vec![p.colour])),
-                    alt: ramps.get(&alt).cloned().unwrap_or_else(|| Ramp::new(vec![alt])),
-                    texture: textures[tex_idx].1.clone(),
-                    threshold: 128,
-                    phase: 0.0,
-                };
-                shade_disc_pattern(&mut surface, &table, cx, cy, (r * 2) as usize, light, &pattern);
+                if r >= 1 {
+                    let (cx, cy) =
+                        (screen[over].x.round() as i32, screen[over].y.round() as i32);
+                    let rim = if p.rim == 0 { OUTLINE } else { p.rim };
+                    fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), rim);
+                }
+                draw(over, &mut surface);
             }
         }
 
@@ -901,6 +946,68 @@ mod walk_tests {
             }
         }
         assert!(worst > 0.4, "spine stayed straight; max deviation {worst:.2} px");
+    }
+
+    #[test]
+    fn nothing_floats_after_a_grab() {
+        let (mut doll, c, rest, mut w) = rig();
+        let dt = 1.0 / 120.0;
+        for _ in 0..120 {
+            w.advance(dt);
+            w.pose(&mut doll, &c, &rest);
+            doll.step(dt);
+        }
+        // Grab the middle of the back and yank it up and forward.
+        let i = c.spine[2];
+        doll.release_all();
+        doll.particles[i].pinned = true;
+        let home = doll.particles[i].pos;
+        let side0 = doll.particles[i].side;
+        for k in 0..90 {
+            let p = &mut doll.particles[i];
+            p.pos = Vec2::new(home.x + k as f32 * 0.6, home.y - k as f32 * 0.6);
+            p.prev = p.pos;
+            doll.step(dt);
+        }
+        doll.particles[i].pinned = false;
+        doll.restore_sides();
+        let _ = side0;
+        // Same re-centring the release handler does.
+        let n = c.spine.len().max(1) as f32;
+        let mut cur = Vec2::new(0.0, 0.0);
+        let mut rst = Vec2::new(0.0, 0.0);
+        for (k, &idx) in c.spine.iter().enumerate() {
+            cur.x += doll.particles[idx].pos.x;
+            cur.y += doll.particles[idx].pos.y;
+            rst.x += rest.spine[k].x;
+            rst.y += rest.spine[k].y;
+        }
+        let shift = Vec2::new((cur.x - rst.x) / n, (cur.y - rst.y) / n);
+        for p in doll.particles.iter_mut() {
+            p.pos.x -= shift.x;
+            p.pos.y -= shift.y;
+            p.prev.x -= shift.x;
+            p.prev.y -= shift.y;
+        }
+        // Let it walk on for three seconds.
+        for _ in 0..360 {
+            w.advance(dt);
+            w.pose(&mut doll, &c, &rest);
+            doll.step(dt);
+        }
+        // Every ball should end up within a body's reach of the spine.
+        let mut cx = 0.0;
+        let mut cy = 0.0;
+        for &idx in &c.spine {
+            cx += doll.particles[idx].pos.x;
+            cy += doll.particles[idx].pos.y;
+        }
+        cx /= n;
+        cy /= n;
+        for (k, p) in doll.particles.iter().enumerate() {
+            let d = (p.pos.x - cx).hypot(p.pos.y - cy);
+            assert!(d < 260.0, "ball {k} stranded {d:.0} px from the body");
+        }
     }
 
     #[test]

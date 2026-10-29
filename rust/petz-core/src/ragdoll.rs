@@ -70,6 +70,9 @@ pub struct Particle {
     /// in the animal's sagittal plane, so this is authored rather than
     /// simulated: it is what puts a left leg to the left of a right one.
     pub side: f32,
+    /// The authored lateral offset, so a drag can be undone. Side is not
+    /// simulated, so nothing else would ever pull a dragged ball back.
+    pub rest_side: f32,
     /// Colour of the rim drawn around this ball. The retail data carries a
     /// per-ball outline colour, and the eye uses it for the iris ring.
     pub rim: u8,
@@ -90,6 +93,7 @@ impl Particle {
             target: None,
             follow: 0.0,
             side: 0.0,
+            rest_side: 0.0,
             rim: 0,
             layer: 0,
         }
@@ -222,6 +226,14 @@ impl Ragdoll {
         if let Some(p) = self.particles.get_mut(index) {
             p.target = Some(target);
             p.follow = follow.clamp(0.0, 1.0);
+        }
+    }
+
+    /// Put every ball back on its authored lateral offset. Dragging changes
+    /// side directly, and the solver cannot undo that.
+    pub fn restore_sides(&mut self) {
+        for p in self.particles.iter_mut() {
+            p.side = p.rest_side;
         }
     }
 
