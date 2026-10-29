@@ -54,6 +54,10 @@ const IRIS_RING: u8 = 6;
 const EYE_SIDES: [f32; 2] = [-12.0, 12.0];
 /// Ears are a darker shade than the coat, as they are in every breed file.
 const EAR: u8 = 95;
+/// A lighter shade for the tip, so the ear is two-tone and reads as an ear
+/// rather than a lump. The breed files do the same thing with an inner-ear
+/// colour.
+const EAR_TIP: u8 = 100;
 
 /// Where the floor is. Feet stand on this line.
 const GROUND: f32 = 218.0;
@@ -214,6 +218,21 @@ fn build() -> (Ragdoll, Creature) {
     r.link(skull, spine[spine.len() - 2]);
 
     let head_balls = vec![skull, muzzle, nose];
+
+    // Ears: a base and a tip each. Two balls, because the retail ear is six and
+    // buys a shape we do not need at this fidelity. The tip is deliberately not
+    // driven - the solver gives it the flop for free, and it bounces with the
+    // gait because the base hangs off the skull.
+    for side in [-1.0f32, 1.0] {
+        let base = r.add(Particle::new(378.0, base_y - 50.0, 9.0, EAR));
+        let tip = r.add(Particle::new(371.0, base_y - 64.0, 7.0, EAR_TIP));
+        for i in [base, tip] {
+            r.particles[i].side = 10.0 * side;
+            r.particles[i].rest_side = 10.0 * side;
+        }
+        r.link(skull, base);
+        r.link(base, tip);
+    }
 
     // Eyes. The retail data is two balls per eye: a white sclera and a black
     // pupil whose *outline* is the iris, in a per-breed colour. There is no
@@ -1631,6 +1650,21 @@ mod walk_tests {
             .map(|&i| (doll.particles[i].pos.x, doll.particles[i].pos.y, doll.particles[i].side))
             .collect();
         assert!(d < 0.6, "eyes differ in height by {d:.2} px: {ys:?} positions {info:?}");
+    }
+
+    #[test]
+    fn the_head_has_the_expected_parts() {
+        // Counts, because a bad edit once duplicated the eye block and the dog
+        // came out with four of everything.
+        let (doll, c, _, _) = rig();
+        let count = |colour: u8| doll.particles.iter().filter(|p| p.colour == colour).count();
+        assert_eq!(count(SCLERA), 2, "sclerae");
+        assert_eq!(count(IRIS), 2, "pupils");
+        assert_eq!(count(EAR), 2, "ear bases");
+        assert_eq!(count(EAR_TIP), 2, "ear tips");
+        assert_eq!(c.eyes.len(), 2, "two eyes");
+        assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
+        assert_eq!(c.head.len(), 7, "skull, muzzle, nose and four eye balls");
     }
 
     #[test]
