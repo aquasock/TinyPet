@@ -552,6 +552,14 @@ impl Walker {
                         p.z_bias = self.ear_bias;
                     }
                 }
+                // Let the springs follow the drive. Held at the lengths they
+                // were built with, moving an ear makes them pull - and the pull
+                // travels from the ear into the skull, the neck and the spine,
+                // so tuning the ears rearranges the whole animal.
+                let d1 = (bx - sk.x).hypot(by - sk.y);
+                let d2 = (tx - bx).hypot(ty - by);
+                doll.set_rest(creature.skull, base, d1);
+                doll.set_rest(base, tip, d2);
             }
         }
 
@@ -1634,6 +1642,32 @@ mod walk_tests {
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
         assert_eq!(c.head.len(), 11, "skull, muzzle, nose, four ear and four eye balls");
         assert_eq!(doll.particles.len(), 31, "total ball count");
+    }
+
+    #[test]
+    fn tuning_the_ears_does_not_move_the_head() {
+        // Reported from play: adjusting the ears dragged the head, the neck and
+        // the spine with them. The ear springs were built at their original
+        // lengths, so driving an ear made them pull on the skull.
+        let settle = |angle: f32| {
+            let (mut doll, c, rest, mut w) = rig();
+            w.ear_angle = angle;
+            for _ in 0..180 {
+                w.pose(&mut doll, &c, &rest);
+                doll.step(1.0 / 120.0);
+            }
+            (doll.particles[c.skull].pos, doll.particles[c.spine[3]].pos)
+        };
+        let (skull_a, neck_a) = settle(-0.35);
+        let (skull_b, neck_b) = settle(0.9);
+        assert!(
+            skull_a.sub(skull_b).length() < 1.0,
+            "skull moved from {skull_a:?} to {skull_b:?}"
+        );
+        assert!(
+            neck_a.sub(neck_b).length() < 1.0,
+            "neck moved from {neck_a:?} to {neck_b:?}"
+        );
     }
 
     #[test]
