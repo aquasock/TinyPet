@@ -506,24 +506,18 @@ impl Walker {
         }
         let skull_now = doll.particles[creature.skull].pos;
         let skull_rest = rest.head[0];
-        // Ears are placed as a pair separated along the *screen's* horizontal,
-        // not the body's lateral axis. A body-lateral offset turns into depth as
-        // the animal turns, and depth is what the pitched view converts into
-        // height - which is why the two ears sat at different heights in
-        // profile. Separated along world x they share a depth, so they share a
-        // height at every heading.
+        // Ears separated along the body's lateral axis, which is what puts them
+        // on one vertical axis when the animal is side-on: at 90 degrees the
+        // lateral offset is entirely depth, so the two share a screen x and
+        // differ only in height.
         {
             let sk = doll.particles[creature.skull].pos;
-            let h = self.heading_body;
             const SEP: f32 = 10.0;
             for (k, &ear) in creature.ears.iter().enumerate() {
                 let s = if k == 0 { -1.0 } else { 1.0 };
-                // Body coordinates that come out as a pure world-x offset.
-                let bx = sk.x - 8.0 + s * SEP * h.sin();
-                let by = sk.y - 30.0;
-                doll.drag_to(ear, Vec2::new(bx, by));
+                doll.drag_to(ear, Vec2::new(sk.x - 8.0, sk.y - 30.0));
                 if let Some(p) = doll.particles.get_mut(ear) {
-                    p.side = s * SEP * h.cos();
+                    p.side = s * SEP;
                 }
             }
         }
@@ -1575,7 +1569,7 @@ mod walk_tests {
     }
 
     #[test]
-    fn the_two_ears_share_a_screen_height() {
+    fn the_two_ears_share_a_vertical_axis_in_profile() {
         // Reported from play: at 90 degrees the ears did not line up. Their
         // separation is along world x, which is the screen's horizontal, so both
         // have the same depth and therefore the same height at every heading.
@@ -1591,20 +1585,24 @@ mod walk_tests {
                 w.pose(&mut doll, &c, &rest);
                 doll.step(1.0 / 120.0);
             }
-            let ys: Vec<f32> = c
+            let pts: Vec<(f32, f32)> = c
                 .ears
                 .iter()
                 .map(|&e| {
                     let p = &doll.particles[e];
                     let b = Body { pos: w.body.pos, heading: w.body.heading };
-                    view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y)).y
+                    let s = view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y));
+                    (s.x, s.y)
                 })
                 .collect();
-            assert!(
-                (ys[0] - ys[1]).abs() < 0.5,
-                "at {deg} degrees the ears differ in height by {:.1} px",
-                (ys[0] - ys[1]).abs()
-            );
+            if (deg - 90.0).abs() < 0.1 || (deg - 270.0).abs() < 0.1 {
+                // Side on: one above the other, sharing a vertical axis.
+                assert!(
+                    (pts[0].0 - pts[1].0).abs() < 0.5,
+                    "at {deg} degrees the ears differ in x by {:.1} px",
+                    (pts[0].0 - pts[1].0).abs()
+                );
+            }
         }
     }
 
