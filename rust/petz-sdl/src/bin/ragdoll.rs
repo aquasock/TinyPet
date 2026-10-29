@@ -241,11 +241,20 @@ fn build() -> (Ragdoll, Creature) {
         // On top of the skull rather than behind it, and reaching upwards. The
         // tips are driven, not left to gravity: a free tip hangs, which is what
         // made the ears droop instead of stand.
-        let base = r.add(Particle::new(378.0, base_y - 54.0, 9.0, EAR));
-        let tip = r.add(Particle::new(374.0, base_y - 72.0, 6.0, EAR_TIP));
+        // High enough that the base's own centre clears the skull's sphere,
+        // or the head clips the ear it is holding up.
+        let base = r.add(Particle::new(378.0, base_y - 58.0, 9.0, EAR));
+        let tip = r.add(Particle::new(374.0, base_y - 76.0, 6.0, EAR_TIP));
         for i in [base, tip] {
             r.particles[i].side = 10.0 * side;
             r.particles[i].rest_side = 10.0 * side;
+        }
+        // Settle the tip a sixth of the way down into its base, before the link
+        // is made, so the spring is built at the length that actually exists.
+        {
+            let (bx, by) = (r.particles[base].pos.x, r.particles[base].pos.y);
+            let (tx, ty) = (r.particles[tip].pos.x, r.particles[tip].pos.y);
+            r.particles[tip].pos = Vec2::new(tx + 0.15 * (bx - tx), ty + 0.15 * (by - ty));
         }
         r.link(skull, base);
         r.link(base, tip);
