@@ -33,9 +33,13 @@ move the light, `Z`/`X` ambience, `[`/`]` ramp steps, `T` texture, `,`/`.` spine
 flex, `Tab` ball numbers, `P` print settings, `R` reset, `Space` pause, `Esc`
 quit.
 
-There are no controls for the eyes or the ears any more. Both were tuned from
-the keyboard, then the settled numbers were written into the source as defaults
-and the keys removed. An adjustment now is a constant in `build()` or `pose()`,
+The **ear balls** have no live controls either. They were tuned from the
+keyboard - four pairs, `B` switching between the bases and the tips - and the
+settled numbers are now constants (`EAR_*`), with a test pinning them. An
+adjustment is an edit in the source.
+
+The eyes have none. Their numbers were tuned, written into the source as
+defaults and the keys removed; an eye adjustment is a constant in `Walker::new`,
 not a live tweak.
 
 The big number in the top left is the facing: **0** away from the viewer, **90**
@@ -191,27 +195,88 @@ constants now.
 
 ## The ears
 
-Two balls a side, an ordinary body segment in everything but placement: base
-(colour 95, radius 10) and tip (colour 100, radius 7), both pinned, both placed
+Two balls a side, an ordinary body segment in everything but placement. The base
+is the same colour as the coat, so it merges with the head and only the tip
+reads as ear. Base (coat colour, radius 10) and tip (its own colour, radius 7),
+both pinned, both placed
 by `pose()` every frame from the skull's position:
 
 ```
-base  sk.x - 8   sk.y - 30   r 10
-tip   sk.x - 18  sk.y - 44   r 7
-side  +-10       (body-lateral, not screen)
+base  sk.x - 0   sk.y - 32   r 10    (frozen)
+tip   base - 0.8 base - 12.8 r 7     (live: back 1, up 16, size 7, sink 0.20)
+side  +-10       (body-lateral, not screen, frozen)
 ```
+
+The palette is currently a diagnostic set asked for by eye, not the final
+colours: coat and ear tips black (0), the nose pink (70), the four feet and the third
+spine ball (ball 2) white (245), and `PETZ_DIAG=1` still paints the second ear blue with
+every rim red. None of the numbers below move with the palette.
 
 The lateral offset is body-lateral and goes through the projection, so the two
 ears are mirror images facing the camera and share a screen x in profile. Forcing
 that in screen space instead made them the same height at every heading, which is
 wrong - one ear really is above the other at 90 degrees.
 
-Depth is one bias, `z_bias = (skull_depth - 1) - ear_depth`, and it does both
-jobs at once: the ear is past the skull's rim, drawn half a unit behind the
-skull's centre, so the head's outline no longer runs across the ear; and it is
-behind the skull's own surface, a full radius in front, so the head still covers
-the ear where they overlap. That is exactly how two body segments meet, and the
-eyes are the only exemption.
+Depth is one bias and it does two jobs at once: the ear has to be past the
+skull's rim, drawn half a unit behind the skull's centre, so the head's outline
+does not run across the ear; and behind the skull's own surface, so the head
+still covers the ear where they overlap. That is how two body segments meet, and
+the eyes are the only exemption.
+
+It used to place every ear at exactly `skull_depth - 1`, which flattened the
+pair onto one plane - and then which ear covered the other was decided by draw
+order, not by which was nearer. The depth test is strict (`<`), so the first
+drawn won, and at 90 degrees the far ear covered the near one.
+
+The fix is a plane per ear that keeps the pair's own depth order:
+
+```
+plane = (skull_depth - 1) + 0.15 * (ear_depth - mean_ear_depth)
+z_bias = (plane + radius) - ear_depth
+```
+
+Deviating from the skull instead of the mean does not work: an ear sits 32 above
+the skull's centre, which at a 25 degree pitch is 13 units of depth that has
+nothing to do with which ear is nearer, and scaling that puts the far ear behind
+the head's rim.
+
+The `+ radius` is not decoration. The rasterizer puts a ball's *surface* at
+`centre - nz * radius`, so a plane that carries the centre lets the bigger ball
+reach further forward: a base of radius 10 reached 3 units past a tip of radius
+7 and beat it, even though the tip's centre was 2.7 nearer. Carrying the radius
+puts each sphere's *nearest point* on the plane.
+
+That still leaves the two ears interleaving pixel by pixel, because one sphere
+spans its own radius in depth and the pair were only ~2.7 apart: the back ear's
+body punched holes through the front ear's texture, which read as slivers
+between the texture and its outline. So the front ear - the one whose base is
+nearer - is pushed a further `EAR_FRONT` (11) clear. More than a radius, so
+every pixel of the front ear beats every pixel of the back one; small enough
+that the ear still passes behind the skull's surface where it sinks into the
+head. Both ears keep the ordinary rim, drawn as a flat disc behind the body,
+which is what makes the texture fill right out to its outline.
+
+Under `PETZ_DIAG` the second ear is painted blue and every rim red, so which
+ball covers which can be read off a dump rather than argued about.
+
+Both sets of numbers are constants now, at the values that were tuned by eye:
+
+```
+EAR_BACK      -2.0   how far behind the skull's centre the base sits
+EAR_UP        28.0   how far above it
+EAR_SEP       14.0   how far to each side
+EAR_SIZE       9.5   the base ball's radius
+
+EAR_TIP_BACK   0.0   how far behind its base
+EAR_TIP_UP    12.0   how far above it
+EAR_TIP_SIZE   6.5   the tip ball's radius
+EAR_TIP_SINK   0.20  how far it is pulled back into its base
+```
+
+The back and up offsets are scaled by `1 - tip_sink`, so a sink of 0.2 brings the
+tip 20% closer to its base. Moving one tip alone is not offered: both take the
+same numbers, and the symmetry is what makes them read as a pair. When the tips
+are settled, their numbers become constants in `Walker::new` and the keys go.
 
 Tried and dropped, so nobody pays for it twice: drawing ears through the eye
 renderer as copies of the eye shells; a bespoke z order for the ears; deriving

@@ -48,7 +48,9 @@ The shape of it:
 - The head is one ball. A seven-ball cluster was tried and removed.
 - Ears are placed by `pose()`, pinned, with `z_bias = (skull_depth - 1) - ear_depth`.
   They are not shells, not a bespoke sort key, and not angle-placed like eyes.
-- No live keys for eyes or ears remain. Adjusting them means editing a constant.
+- Neither the eyes nor the ears have live keys. The ears were tuned from the
+  keyboard and the settled numbers are now `EAR_*` constants with a test that
+  pins them; `P` prints them next to the eye numbers.
 
 ## Known wrong or unproven
 
@@ -73,8 +75,9 @@ against a capture before any of it is trusted.
 - Sandbox binary: `rust/petz-sdl/src/bin/ragdoll.rs` (~1700 lines). Build with
   `cargo build --release -p petz-sdl --bin ragdoll`.
 - A sandbox may still be running on `:0.0` under the window name
-  "petz ragdoll sandbox"; it re-centres itself on launch, so move it with
-  `xdotool windowmove --sync <id> 1300 40`.
+  "petz ragdoll sandbox". It no longer positions itself: pass
+  `PETZ_WINDOW=x,y` to place it at creation, or let the window manager pick.
+  Do not move it after it appears - that is the jump the user sees.
 - Instruments: `PETZ_HEADING=<deg>` pins facing, `PETZ_DUMP_PPM=1` writes
   `/tmp/ours.ppm`, `PETZ_SWEEP=1` rotates and logs. `xwd` on an overlapped
   window captures the composited desktop, so count pixels in the PPM instead.

@@ -40,9 +40,19 @@ const H: usize = 480;
 const BACKGROUND: u8 = 130;
 
 const OUTLINE: u8 = 89;
-const BODY: u8 = 61;
+/// Diagnostic colours, in place of the real ones when `PETZ_DIAG` is set: the
+/// near ear in pure blue and every rim in pure red, so which ball covers which
+/// can be read off a screenshot instead of argued about.
+const DIAG_EAR: u8 = 252;
+const DIAG_OUTLINE: u8 = 249;
+// Diagnostic palette, asked for by eye: black fur everywhere, a pink nose,
+// white feet. `BODY` is what "fur" resolves to, so the coat, the head, the legs
+// and the tail all follow it.
+const BODY: u8 = 0;
 const LIGHT: u8 = 10;
 const DARK: u8 = 0;
+/// The nose, for this diagnostic set: a clear pink against the black coat.
+const PINK: u8 = 70;
 /// Retail `;L eye` colour: white sclera.
 const SCLERA: u8 = 245;
 /// Retail `;L iris` colour: black pupil, with the iris ring drawn as its
@@ -52,15 +62,31 @@ const IRIS_RING: u8 = 6;
 
 /// One eye per side, at this lateral offset.
 const EYE_SIDES: [f32; 2] = [-12.0, 12.0];
-/// Ears are a darker shade than the coat, as they are in every breed file.
-const EAR: u8 = 95;
-/// The eyelid shell. A shade darker than the coat, so the lid reads as a lid
-/// rather than as more of the face.
-const LID: u8 = 69;
-/// A lighter shade for the tip, so the ear is two-tone and reads as an ear
-/// rather than a lump. The breed files do the same thing with an inner-ear
-/// colour.
-const EAR_TIP: u8 = 100;
+/// The eyelid shell. Black for this diagnostic set, like the rest of the fur.
+const LID: u8 = 0;
+
+// The ear balls, frozen at the placement that was tuned by eye. The base hangs
+// off the skull's centre; the tip hangs off its base and is pulled into it by
+// `EAR_TIP_SINK`. Sizes are radii. There are no keys for these any more - an
+// adjustment is an edit here.
+const EAR_BACK: f32 = -2.0;
+const EAR_UP: f32 = 28.0;
+const EAR_SEP: f32 = 14.0;
+const EAR_SIZE: f32 = 9.5;
+const EAR_TIP_BACK: f32 = 0.0;
+const EAR_TIP_UP: f32 = 12.0;
+const EAR_TIP_SIZE: f32 = 6.5;
+const EAR_TIP_SINK: f32 = 0.20;
+
+/// How far the front ear is pushed clear of the back one, in depth units.
+///
+/// Two ears a couple of units apart interleave pixel by pixel, because a single
+/// sphere spans its own radius in depth: the back ear's body punches holes
+/// through the front ear's, which reads as slivers between texture and outline.
+/// Eleven is more than a radius, so the front ear wins everywhere inside its own
+/// silhouette, and it is small enough that the ear still passes behind the
+/// skull's surface where it sinks into the head.
+const EAR_FRONT: f32 = 11.0;
 
 /// Where the floor is. Feet stand on this line.
 const GROUND: f32 = 218.0;
@@ -170,6 +196,7 @@ struct Creature {
 }
 
 fn build() -> (Ragdoll, Creature) {
+    let diag = std::env::var("PETZ_DIAG").is_ok();
     let mut r = Ragdoll::new();
     r.bounds = Some((-4000.0, 8.0, 4000.0, 460.0));
     r.gravity = 1400.0;
@@ -190,7 +217,10 @@ fn build() -> (Ragdoll, Creature) {
     let mut spine = Vec::new();
     for i in 0..spine_r.len() {
         let fwd = 276.0 + i as f32 * spacing;
-        spine.push(r.add(Particle::new(fwd, GROUND - 68.0, spine_r[i], BODY)));
+        // Ball 2 is white, so the numbering can be read off the back - the
+        // coat's own white (LIGHT), which shades, not the sclera's flat one.
+        let colour = if i == 2 { LIGHT } else { BODY };
+        spine.push(r.add(Particle::new(fwd, GROUND - 68.0, spine_r[i], colour)));
     }
     // Lift the neck onto the head's own axis. The skull runs from (386, base-26)
     // to the muzzle at (408, base-16); continuing that line backwards by one
@@ -224,7 +254,7 @@ fn build() -> (Ragdoll, Creature) {
     // *inside* the muzzle and the containment rule hides it, which is what
     // swallowed the black tip.
     // The nose rides on the muzzle, so it moves with it.
-    let nose = r.add(Particle::new(422.0, base_y - 20.0, 5.0, DARK));
+    let nose = r.add(Particle::new(422.0, base_y - 20.0, 5.0, PINK));
     r.particles[nose].no_rim = true;
     r.link(neck, skull);
     r.link(skull, muzzle);
@@ -241,8 +271,17 @@ fn build() -> (Ragdoll, Creature) {
     // not run across them. The tip is the lighter ball.
     let mut ear_balls: Vec<(usize, usize, f32)> = Vec::new();
     for side in [-1.0f32, 1.0] {
-        let base = r.add(Particle::new(378.0, base_y - 58.0, 10.0, EAR));
-        let tip = r.add(Particle::new(368.0, base_y - 72.0, 7.0, EAR_TIP));
+        // The base is coat colour: the ear is the tip, and the base exists to
+        // carry it, so a distinct shade there just read as a brown lump.
+        // PETZ_DIAG paints the second ear (balls 9 and 10) in pure blue, to be
+        // read against the red outline main() switches in.
+        let (base_col, tip_col) = if diag && side > 0.0 {
+            (DIAG_EAR, DIAG_EAR)
+        } else {
+            (BODY, LIGHT)
+        };
+        let base = r.add(Particle::new(378.0, base_y - 58.0, 10.0, base_col));
+        let tip = r.add(Particle::new(368.0, base_y - 72.0, 7.0, tip_col));
         // Pinned and placed every frame, like everything else on the head that
         // the pose owns. A spring would only pull the skull about.
         for i in [base, tip] {
@@ -334,7 +373,14 @@ fn build() -> (Ragdoll, Creature) {
     let mut tail = Vec::new();
     let mut tail_prev = spine[0];
     for i in 0..4 {
-        let t = r.add(Particle::new(252.0 - i as f32 * 15.0, base_y - 10.0, 10.0 - i as f32 * 1.2, BODY));
+        // Balls 27 and 29 white, the two alternate tail segments.
+        let tail_col = if i == 0 || i == 2 { LIGHT } else { BODY };
+        let t = r.add(Particle::new(
+            252.0 - i as f32 * 15.0,
+            base_y - 10.0,
+            10.0 - i as f32 * 1.2,
+            tail_col,
+        ));
         r.link(tail_prev, t);
         tail_prev = t;
         tail.push(t);
@@ -513,14 +559,28 @@ impl Walker {
         // differ only in height.
         {
             let sk = doll.particles[creature.skull].pos;
-            const SEP: f32 = 10.0;
+            let base_at = Vec2::new(sk.x - EAR_BACK, sk.y - EAR_UP);
+            // The tip hangs back and up of its base, shortened by the sink so
+            // the two balls blend instead of always reading as a cap stuck on
+            // a lump.
+            let apart = 1.0 - EAR_TIP_SINK;
+            let tip_at = Vec2::new(
+                base_at.x - EAR_TIP_BACK * apart,
+                base_at.y - EAR_TIP_UP * apart,
+            );
             for &(base, tip, s) in &creature.ears {
-                doll.drag_to(base, Vec2::new(sk.x - 8.0, sk.y - 30.0));
-                doll.drag_to(tip, Vec2::new(sk.x - 18.0, sk.y - 44.0));
+                doll.drag_to(base, base_at);
+                doll.drag_to(tip, tip_at);
                 for i in [base, tip] {
                     if let Some(p) = doll.particles.get_mut(i) {
-                        p.side = s * SEP;
+                        p.side = s * EAR_SEP;
                     }
+                }
+                if let Some(p) = doll.particles.get_mut(base) {
+                    p.radius = EAR_SIZE;
+                }
+                if let Some(p) = doll.particles.get_mut(tip) {
+                    p.radius = EAR_TIP_SIZE;
                 }
             }
         }
@@ -650,6 +710,15 @@ fn report_eyes(w: &Walker) {
     );
 }
 
+fn report_ears() {
+    println!(
+        "ear bases: back {EAR_BACK:.1}  up {EAR_UP:.1}  apart {EAR_SEP:.1}  size {EAR_SIZE:.1}"
+    );
+    println!(
+        "ear tips:  back {EAR_TIP_BACK:.1}  up {EAR_TIP_UP:.1}  size {EAR_TIP_SIZE:.1}  sink {EAR_TIP_SINK:.2}"
+    );
+}
+
 fn report(light: Light, steps: usize, tex: usize, texture: &str) {
     let yaw = light.dir.x.atan2(light.dir.z).to_degrees();
     let pitch = light.dir.y.asin().to_degrees();
@@ -657,6 +726,65 @@ fn report(light: Light, steps: usize, tex: usize, texture: &str) {
         "settings: steps={steps} yaw={yaw:.1} pitch={pitch:.1} ambient={:.2} diffuse={:.2} tex={tex} ({texture})",
         light.ambient, light.diffuse
     );
+}
+
+/// Where the *nearest point* of an ear's sphere is drawn, given the skull's
+/// depth, the ear's own, and the mean of the ear depths.
+///
+/// Two jobs at once: the ear has to be in front of the skull's rim, which is
+/// drawn half a unit behind its centre, or the head's outline runs across the
+/// ear; and behind the skull's own surface, so the head still covers the ear
+/// where they overlap, exactly as two body segments meet.
+///
+/// The one thing it must not do is collapse both ears onto the same plane.
+/// It did, and then which ear covered the other was decided by draw order
+/// rather than by which was nearer - at 90 degrees the far ear won. The
+/// deviation *from the pair's own mean* is scaled by KEEP and kept, so the
+/// ears hold their real order without either one drifting out from under the
+/// head. Deviating from the skull instead would not work: an ear sits 32 above
+/// the skull's centre, which at a 25 degree pitch is 13 of depth that has
+/// nothing to do with which ear is nearer, and scaling that lands the far ear
+/// outside the rim.
+fn ear_plane(sk_depth: f32, ear_depth: f32, ear_mean: f32) -> f32 {
+    const KEEP: f32 = 0.15;
+    (sk_depth - 1.0) + KEEP * (ear_depth - ear_mean)
+}
+
+/// The plane each ear ball's *nearest point* is drawn at, in the order the
+/// depths are given: base, tip, base, tip.
+///
+/// Three rules in one place. The pair keeps its own depth order, scaled so the
+/// two ears do not collapse onto one plane. The front ear - the one whose base
+/// is nearer - is pushed clear by more than a radius, or the two surfaces
+/// interleave pixel by pixel and the back ear shows through the front one's
+/// texture. And the whole set is shifted together if the back ear would
+/// otherwise fall behind the skull's rim, where the head's outline would run
+/// across it; shifting the set rather than clamping each plane keeps the tip's
+/// offset from its base intact.
+fn ear_planes(sk_depth: f32, d: [f32; 4]) -> [f32; 4] {
+    let mean = (d[0] + d[1] + d[2] + d[3]) / 4.0;
+    let front_is_second = d[2] < d[0];
+    let mut planes = [0.0f32; 4];
+    for (k, pair) in [(0usize, [0usize, 1usize]), (1, [2, 3])] {
+        let push = if (k == 1) == front_is_second { EAR_FRONT } else { 0.0 };
+        for j in pair {
+            planes[j] = ear_plane(sk_depth, d[j], mean) - push;
+        }
+    }
+    let furthest = planes.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let shift = (sk_depth - 0.5 - furthest).min(0.0);
+    for p in planes.iter_mut() {
+        *p += shift;
+    }
+    planes
+}
+
+/// `PETZ_WINDOW=x,y`, if it parses, so a scripted run lands where the script
+/// says rather than wherever the window manager picks.
+fn window_at() -> Option<(i32, i32)> {
+    let raw = std::env::var("PETZ_WINDOW").ok()?;
+    let (x, y) = raw.split_once(',')?;
+    Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
 }
 
 fn main() -> Result<(), String> {
@@ -667,11 +795,16 @@ fn main() -> Result<(), String> {
         .min(display.height() as i32 / H as i32)
         .max(1) as usize;
 
-    let window = video
-        .window("petz ragdoll sandbox", (W * scale) as u32, (H * scale) as u32)
-        .position_centered()
-        .build()
-        .map_err(|e| e.to_string())?;
+    let mut builder = video.window("petz ragdoll sandbox", (W * scale) as u32, (H * scale) as u32);
+    // Where the window lands is not this program's business. It used to centre
+    // itself on launch, which moved the window out from under whatever was
+    // already there - the sandbox cannot be put beside anything if it relocates
+    // itself on every start. Left alone, the window manager places it; pinned
+    // runs say where with PETZ_WINDOW=x,y.
+    if let Some(at) = window_at() {
+        builder.position(at.0, at.1);
+    }
+    let window = builder.build().map_err(|e| e.to_string())?;
     let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
     let tc = canvas.texture_creator();
     let mut tex = tc
@@ -718,6 +851,8 @@ fn main() -> Result<(), String> {
     let mut depth = DepthBuffer::new(W, H);
     // Ball numbers, for referring to them. Tab toggles.
     let mut show_ids = true;
+    // Diagnostics: red outlines under PETZ_DIAG, so the ear ordering shows up.
+    let outline = if std::env::var("PETZ_DIAG").is_ok() { DIAG_OUTLINE } else { OUTLINE };
 
     let mut events = sdl.event_pump()?;
     let mut paused = false;
@@ -728,8 +863,8 @@ fn main() -> Result<(), String> {
     println!(
         "drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
          light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
-         Tab: ball numbers   P: settings\n\
-         P: settings   R: reset   Space: pause   Esc: quit"
+         (the ear balls are frozen: no keys - see EAR_* in the source)\n\
+         Tab: ball numbers   P: settings   R: reset   Space: pause   Esc: quit"
     );
     report(light, steps, tex_idx, textures[tex_idx].0);
 
@@ -820,6 +955,7 @@ fn main() -> Result<(), String> {
                     sdl2::keyboard::Keycode::P => {
                         report(light, steps, tex_idx, textures[tex_idx].0);
                         report_eyes(&walker);
+                        report_ears();
                     }
                     // Height as an angle round the head's centre, not an offset
                     // from the ground: raising an ear walks it up the sphere,
@@ -1036,23 +1172,38 @@ fn main() -> Result<(), String> {
             .chain(creature.eye_overlays.iter().map(|(_, o)| *o))
             .collect();
 
-        // The ears take the head's depth, one unit in front of its centre. That
-        // single position does both jobs: it is in front of the skull's rim,
-        // which is drawn half a unit behind its centre, so the head's outline no
-        // longer runs across the ears; and it is behind the skull's own surface,
-        // which is a full radius in front, so the skull still covers the ear
-        // where they overlap and the ear's outline does not show against the
-        // head. Exactly how two body segments meet.
-        //
-        // The eyes are exempt: their outline is supposed to sit on the head.
+        // The ears ride just in front of the skull, so the head's outline does
+        // not run across them, while staying behind the skull's own surface so
+        // the head still covers them where they overlap. The eyes are exempt:
+        // their outline is supposed to sit on the head.
         {
             let sk_depth = screen[creature.skull].depth;
-            for &(base, tip, _) in &creature.ears {
-                for ear in [base, tip] {
-                    let d = screen[ear].depth;
-                    if let Some(p) = doll.particles.get_mut(ear) {
-                        p.z_bias = (sk_depth - 1.0) - d;
-                    }
+            let ear_balls: Vec<usize> = creature
+                .ears
+                .iter()
+                .flat_map(|&(base, tip, _)| [base, tip])
+                .collect();
+            let mean = ear_balls.iter().map(|&i| screen[i].depth).sum::<f32>()
+                / ear_balls.len() as f32;
+            // The ear planes, then each ball's bias from its own depth. See
+            // `ear_planes` for why they are worked out as a set.
+            let order = [
+                creature.ears[0].0, creature.ears[0].1,
+                creature.ears[1].0, creature.ears[1].1,
+            ];
+            let depths = [
+                screen[order[0]].depth, screen[order[1]].depth,
+                screen[order[2]].depth, screen[order[3]].depth,
+            ];
+            let planes = ear_planes(sk_depth, depths);
+            for (n, &ear) in order.iter().enumerate() {
+                let r = doll.particles[ear].radius;
+                let d = screen[ear].depth;
+                // The rasterizer puts a ball's *surface* at `centre - nz *
+                // radius`, so the plane has to be carried by the radius: put
+                // the sphere's nearest point on the plane, not its centre.
+                if let Some(p) = doll.particles.get_mut(ear) {
+                    p.z_bias = (planes[n] + r) - d;
                 }
             }
         }
@@ -1077,7 +1228,7 @@ fn main() -> Result<(), String> {
                 // one of radius r at the same centre, so anything under 2 lets
                 // the rim win across the whole ball - which is exactly what
                 // happened: the dog came out entirely in outline colour.
-                let rim = if p.rim == 0 { OUTLINE } else { p.rim };
+                let rim = if p.rim == 0 { outline } else { p.rim };
                 draw_flat_disc(&mut surface, &mut depth, &table, cx, cy,
                     ((r * 2) + 4) as usize, cd + 0.5, rim, &|_, _| true);
             }
@@ -1158,7 +1309,7 @@ fn main() -> Result<(), String> {
                 uy < -(line + ux * tilt.tan())
             };
             draw_ring(&mut surface, &mut depth, &table, ix, iy,
-                ((outer as i32 * 2) as usize).min(255), 2, de, -2.0, OUTLINE, &lid_keep);
+                ((outer as i32 * 2) as usize).min(255), 2, de, -2.0, outline, &lid_keep);
             let lpat = pattern_for(LID);
             draw_disc(&mut surface, &mut depth, &table, ix, iy,
                 ((outer as i32 * 2) as usize).min(255), de, -2.1,
@@ -1184,6 +1335,17 @@ fn main() -> Result<(), String> {
             let ymax = screen.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
             println!("dump: {} balls, depth {:.0}..{:.0}, screen x {:.0}..{:.0} y {:.0}..{:.0}",
                 doll.particles.len(), dmin, dmax, xmin, xmax, ymin, ymax);
+            if std::env::var("PETZ_DIAG").is_ok() {
+                for &(base, tip, _) in &creature.ears {
+                    for e in [base, tip] {
+                        println!("dump ear {e:2} at ({:.1},{:.1}) r{:.1} depth {:.2} bias {:.2} cd {:.2}",
+                            screen[e].x, screen[e].y,
+                            doll.particles[e].radius,
+                            screen[e].depth, doll.particles[e].z_bias,
+                            screen[e].depth + doll.particles[e].z_bias);
+                    }
+                }
+            }
         }
 
         let rgb = palette.to_rgb(&surface);
@@ -1580,12 +1742,28 @@ mod walk_tests {
         // came out with four of everything.
         let (doll, c, _, _) = rig();
         let count = |colour: u8| doll.particles.iter().filter(|p| p.colour == colour).count();
-        assert_eq!(count(SCLERA), 2, "sclerae");
-        assert_eq!(count(IRIS), 2, "pupils");
-        assert_eq!(count(EAR), 2, "ear bases");
-        assert_eq!(count(EAR_TIP), 2, "ear tips");
+        // Named by index, not by colour: the diagnostic palette paints one of
+        // the spine balls white, which is the sclera's colour.
+        assert!(
+            c.eyes.iter().all(|&i| doll.particles[i].colour == SCLERA),
+            "sclerae"
+        );
+        assert!(
+            c.eye_overlays.iter().all(|&(_, i)| doll.particles[i].colour == IRIS),
+            "pupils"
+        );
+        assert!(
+            c.ears.iter().all(|&(base, _, _)| doll.particles[base].colour == BODY),
+            "ear bases are coat colour, not a shade"
+        );
         assert_eq!(c.eyes.len(), 2, "two eyes");
         assert_eq!(c.ears.len(), 2, "two ears, each base plus tip");
+        // Counts by colour stopped meaning anything once the palette went
+        // diagnostic and every fur ball became the same black.
+        for &(base, tip, _) in &c.ears {
+            assert!(c.head.contains(&base) && c.head.contains(&tip), "ear balls are on the head");
+            assert_ne!(base, tip, "a base is not its own tip");
+        }
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
         assert_eq!(c.head.len(), 11, "skull, muzzle, nose, four ear balls, four eye balls");
         assert_eq!(doll.particles.len(), 31, "total ball count");
@@ -1633,6 +1811,104 @@ mod walk_tests {
             }
         }
     }
+
+    #[test]
+    fn the_ear_balls_sit_where_they_were_tuned() {
+        // The ears are frozen: bases at `EAR_*` off the skull's centre, tips at
+        // `EAR_TIP_*` off their bases. This pins the numbers that were tuned by
+        // keyboard, so a stray edit to one of them shows up here.
+        let (mut doll, c, rest, w) = rig();
+        for _ in 0..30 {
+            w.pose(&mut doll, &c, &rest);
+            doll.step(1.0 / 120.0);
+        }
+        // One placement with no step after it, so nothing has drifted since.
+        w.pose(&mut doll, &c, &rest);
+        let sk = doll.particles[c.skull].pos;
+        let apart = 1.0 - EAR_TIP_SINK;
+        for &(base, tip, s) in &c.ears {
+            let b = doll.particles[base].pos;
+            let t = doll.particles[tip].pos;
+            assert!((b.x - (sk.x - EAR_BACK)).abs() < 0.01, "base x {:.2}", b.x - sk.x);
+            assert!((b.y - (sk.y - EAR_UP)).abs() < 0.01, "base y {:.2}", b.y - sk.y);
+            assert!(
+                (doll.particles[base].side - s * EAR_SEP).abs() < 0.001,
+                "base side {:.2}",
+                doll.particles[base].side
+            );
+            assert!((doll.particles[base].radius - EAR_SIZE).abs() < 0.001, "base size");
+            assert!(
+                (t.x - (b.x - EAR_TIP_BACK * apart)).abs() < 0.01,
+                "tip x {:.2}",
+                t.x - b.x
+            );
+            assert!(
+                (t.y - (b.y - EAR_TIP_UP * apart)).abs() < 0.01,
+                "tip y {:.2}",
+                t.y - b.y
+            );
+            assert!((doll.particles[tip].radius - EAR_TIP_SIZE).abs() < 0.001, "tip size");
+        }
+    }
+
+    #[test]
+    fn the_nearer_ear_is_drawn_in_front_at_ninety_degrees() {
+        // Reported from play: at 90 degrees the far ear covered the near one.
+        // Both ears were being drawn at exactly the skull's depth, so the draw
+        // order decided it. Two things have to hold: the projection puts the
+        // far-side ear nearer at 90 and the other one nearer at 270, and the
+        // bias keeps that difference instead of flattening it - while staying
+        // in front of the skull's rim.
+        let view = View::new(25.0, GROUND);
+        for (deg, nearer_is_second) in [(90.0f32, true), (270.0, false)] {
+            let (mut doll, c, rest, mut w) = rig();
+            let rad = deg.to_radians();
+            w.body.heading = rad;
+            w.heading_body = rad;
+            for f in w.facing.iter_mut() {
+                *f = rad;
+            }
+            for _ in 0..80 {
+                w.pose(&mut doll, &c, &rest);
+                doll.step(1.0 / 120.0);
+            }
+            w.pose(&mut doll, &c, &rest);
+            let depth = |i: usize| {
+                let p = &doll.particles[i];
+                let b = Body { pos: w.body.pos, heading: w.body.heading };
+                view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y)).depth
+            };
+            let sk = depth(c.skull);
+            // The same helper the renderer uses, so the test cannot drift from
+            // it. Plane order: base, tip, base, tip.
+            let planes = ear_planes(sk, [
+                depth(c.ears[0].0), depth(c.ears[0].1),
+                depth(c.ears[1].0), depth(c.ears[1].1),
+            ]);
+            let (first, second) = (planes[0], planes[2]);
+            let (near, far) = if nearer_is_second { (second, first) } else { (first, second) };
+            assert!(
+                near < far - 0.5,
+                "at {deg} degrees the ears are {:.2} and {:.2} after the bias - no clear winner",
+                first, second
+            );
+            // Still in front of the skull's rim, drawn at sk + 0.5.
+            assert!(
+                far < sk + 0.5,
+                "at {deg} degrees an ear fell behind the head's rim: skull {sk:.2}, ears {first:.2} and {second:.2}"
+            );
+            // The front ear is pushed clear by more than a radius, so every
+            // pixel of it - its texture and the rim behind that texture - wins
+            // against every pixel of the back ear. Without the gap the two
+            // surfaces interleave and the back ear's body shows through the
+            // front one's texture as slivers.
+            assert!(
+                near + 10.0 < far,
+                "at {deg} degrees the front ear ({near:.2}) is not clear of the back one ({far:.2})"
+            );
+        }
+    }
+
 
     #[test]
     fn nearer_balls_are_drawn_last() {
