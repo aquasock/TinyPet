@@ -360,7 +360,7 @@ impl Walker {
             // The placement tuned by eye, expressed on the sphere: 27 degrees
             // round from straight ahead, at radius 31 against a head of 26.
             eye_angle: 27.0_f32.to_radians(),
-            eye_radius: 31.0,
+            eye_radius: 25.0,
             eye_bias: 1.5,
             lid_drop: 0.26,
             lid_tilt: 0.14,
@@ -979,6 +979,38 @@ fn main() -> Result<(), String> {
             .collect();
         order.sort_by(|&a, &b| sort_depth[b].partial_cmp(&sort_depth[a]).unwrap());
 
+        // A ball whose centre lies inside another ball is *inside the body* and
+        // must be hidden where that ball's surface is in front of it. The white
+        // snout is the case in hand: it sits inside the skull, but ordering by
+        // centre depth drew it flat over the head, so in profile the whole ball
+        // was visible.
+        let n_balls = doll.particles.len();
+        let geo_all: Vec<(f32, f32, f32, f32)> = (0..n_balls)
+            .map(|i| {
+                let p = &doll.particles[i];
+                (screen[i].x, screen[i].y, p.radius.max(1.0), screen[i].depth)
+            })
+            .collect();
+        let containers: Vec<Vec<usize>> = (0..n_balls)
+            .map(|i| {
+                let a = &doll.particles[i];
+                (0..n_balls)
+                    .filter(|&j| {
+                        if j == i {
+                            return false;
+                        }
+                        let b = &doll.particles[j];
+                        let (dx, dl, du) = (
+                            a.pos.x - b.pos.x,
+                            a.side - b.side,
+                            b.pos.y - a.pos.y,
+                        );
+                        (dx * dx + dl * dl + du * du).sqrt() < b.radius - 0.5
+                    })
+                    .collect()
+            })
+            .collect();
+
         let pattern_for = |colour: u8| {
             let alt = match colour {
                 BODY => LIGHT,
@@ -996,6 +1028,9 @@ fn main() -> Result<(), String> {
 
         // ---- ordinary balls: rim then body -----------------------------------
         for &i in &order {
+            if !containers[i].is_empty() {
+                continue; // inside another ball: no rim of its own
+            }
             let p = &doll.particles[i];
             let r = p.radius.round() as i32;
             if r < 1 { continue; }
@@ -1008,7 +1043,34 @@ fn main() -> Result<(), String> {
             let r = p.radius.round() as i32;
             if r < 1 { continue; }
             let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
-            shade_disc_pattern(&mut surface, &table, cx, cy, (r * 2) as usize, light, &pattern_for(p.colour));
+            let pattern = pattern_for(p.colour);
+            if containers[i].is_empty() {
+                shade_disc_pattern(&mut surface, &table, cx, cy, (r * 2) as usize, light, &pattern);
+            } else {
+                // Clip against whichever containing ball is in front.
+                let inner = containers[i].clone();
+                let geo = geo_all.clone();
+                let (fx0, fy0) = (screen[i].x, screen[i].y);
+                let re = p.radius.max(1.0);
+                let de = screen[i].depth;
+                let clip = move |x: i32, y: i32| -> bool {
+                    let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                    let d2 = (fx - fx0).powi(2) + (fy - fy0).powi(2);
+                    let surface = de - (re * re - d2).max(0.0).sqrt();
+                    for &j in &inner {
+                        let (hx, hy, hr, hd) = geo[j];
+                        let dj = (fx - hx).powi(2) + (fy - hy).powi(2);
+                        if dj <= hr * hr {
+                            let outer = hd - (hr * hr - dj).max(0.0).sqrt();
+                            if outer < surface {
+                                return false;
+                            }
+                        }
+                    }
+                    true
+                };
+                shade_disc_pattern_masked(&mut surface, &table, cx, cy, (r * 2) as usize, light, &pattern, &clip);
+            }
         }
 
         // ---- eyes: three shells ---------------------------------------------
@@ -1468,7 +1530,7 @@ mod walk_tests {
     }
 
     fn visible_eyes(heading: f32) -> Vec<bool> {
-        visible_eyes_at(heading, 31.0)
+        visible_eyes_at(heading, 25.0)
     }
 
     /// Does this eye face the viewer? On the sphere the eye sits at
