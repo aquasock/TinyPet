@@ -435,6 +435,8 @@ fn main() -> Result<(), String> {
     let mut walker = Walker::new(&creature, doll.particles.len());
     let mut grabbed: Option<usize> = None;
     let mut grab_point = Vec2::new(0.0, 0.0);
+    let mut grab_home = Vec2::new(0.0, 0.0);
+    let mut grab_side = 0.0f32;
     let mut view = View::new(25.0, GROUND);
     // Projected positions from the last frame; the picker works in screen space.
     let mut screen: Vec<Projected> = Vec::new();
@@ -567,35 +569,81 @@ fn main() -> Result<(), String> {
                         doll.release_all();
                         doll.particles[i].pinned = true;
                         grab_point = Vec2::new(mx, my);
+                        grab_home = doll.particles[i].pos;
+                        grab_side = doll.particles[i].side;
                         grabbed = Some(i);
+                        println!("grab ball {i}");
+                    } else {
+                        println!("grab: nothing within reach");
                     }
                 }
                 sdl2::event::Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, .. } => {
                     if let Some(i) = grabbed.take() {
+                        println!("release ball {i}");
                         doll.particles[i].pinned = false;
+
+                        // The grab moved the skeleton *within* body space, and
+                        // the pose drive pulls body space back to rest - which
+                        // is why letting go rewound the animal to where the
+                        // grab began. Re-centre body space on the rest pose and
+                        // carry the world position with it.
+                        let n = creature.spine.len().max(1) as f32;
+                        let mut cur = Vec2::new(0.0, 0.0);
+                        let mut rst = Vec2::new(0.0, 0.0);
+                        for (k, &idx) in creature.spine.iter().enumerate() {
+                            cur.x += doll.particles[idx].pos.x;
+                            cur.y += doll.particles[idx].pos.y;
+                            rst.x += rest.spine[k].x;
+                            rst.y += rest.spine[k].y;
+                        }
+                        let shift = Vec2::new((cur.x - rst.x) / n, (cur.y - rst.y) / n);
+                        for p in doll.particles.iter_mut() {
+                            p.pos.x -= shift.x;
+                            p.pos.y -= shift.y;
+                            p.prev.x -= shift.x;
+                            p.prev.y -= shift.y;
+                        }
+                        // Horizontally, move the origin by the same distance so
+                        // the picture does not jump. Vertically we let it fall,
+                        // which is what dropping something should look like.
+                        let f = walker.body.forward();
+                        walker.body.pos.x += shift.x * f.x;
+                        walker.body.pos.y += shift.x * f.y;
                     }
                 }
                 sdl2::event::Event::MouseMotion { x, y, .. } => {
                     if let Some(i) = grabbed {
+                        // Drag by *delta*, never by absolute position. An
+                        // absolute unprojection depends on a depth that goes
+                        // stale, and a wrong depth throws the ball hundreds of
+                        // pixels - which the springs then convert into an
+                        // explosion.
                         let mouse = Vec2::new(x as f32 / scale as f32, y as f32 / scale as f32);
-                        let depth = screen.get(i).map(|p| p.depth).unwrap_or(0.0);
-                        let (wy, wz) = view.unproject(mouse.y, depth);
-                        let world = WVec3::new(walker.body.pos.x + mouse.x - grab_point.x, wy, wz);
-                        // Back into body coordinates: project onto the body's
-                        // forward and right axes.
-                        let d = WVec3::new(
-                            world.x - walker.body.pos.x,
-                            world.y - walker.body.pos.y,
-                            0.0,
-                        );
+                        let (dx, dy) = (mouse.x - grab_point.x, mouse.y - grab_point.y);
+
+                        // Screen x maps onto whichever body axis points across
+                        // the view; screen y is mostly height, compressed by
+                        // the view pitch.
                         let f = walker.body.forward();
                         let r = walker.body.right();
-                        let fwd = d.x * f.x + d.y * f.y;
-                        let lat = d.x * r.x + d.y * r.y;
+                        let mut fwd = dx * f.x;
+                        let mut lat = dx * r.x;
+                        let mut up = -dy / view.pitch.cos().max(0.35);
+
+                        // Keep a single yank from outrunning the springs.
+                        const LIMIT: f32 = 90.0;
+                        let len = (fwd * fwd + lat * lat + up * up).sqrt();
+                        if len > LIMIT {
+                            let k = LIMIT / len;
+                            fwd *= k;
+                            lat *= k;
+                            up *= k;
+                        }
+
                         if let Some(p) = doll.particles.get_mut(i) {
-                            p.pos = Vec2::new(fwd, GROUND - (world.z - walker.body.pos.z));
+                            p.pos = Vec2::new(grab_home.x + fwd, grab_home.y - up);
                             p.prev = p.pos;
-                            p.side = lat;
+                            p.side = grab_side + lat;
                         }
                     }
                 }
@@ -615,15 +663,21 @@ fn main() -> Result<(), String> {
                 doll.step(step as f32);
                 acc -= step;
             }
-            // Keep the animal in the visible patch of ground. It can leave in
-            // any direction once it turns, so wrap both axes.
-            let p = &mut walker.body.pos;
-            if p.y > 140.0 { p.y = -520.0; }
-            if p.y < -560.0 { p.y = 100.0; }
-            // x maps straight to screen x, so the wrap has to stay inside the
-            // visible width or the animal spends half its time off-screen.
-            if p.x > 620.0 { p.x = -30.0; }
-            if p.x < -50.0 { p.x = 590.0; }
+            // Turn around at the edges rather than teleporting. Wrapping put
+            // the animal half off-screen for stretches at a time, and turning
+            // is something the animal can actually do - the lag we built for
+            // Q/E plays it out.
+            {
+                let f = walker.body.forward();
+                let p = walker.body.pos;
+                let at_edge = (p.x > 540.0 && f.x > 0.0)
+                    || (p.x < 70.0 && f.x < 0.0)
+                    || (p.y > 120.0 && f.y > 0.0)
+                    || (p.y < -470.0 && f.y < 0.0);
+                if at_edge {
+                    walker.body.heading += std::f32::consts::PI;
+                }
+            }
         }
 
         // Place every ball in the world and project it. The z we get back is
