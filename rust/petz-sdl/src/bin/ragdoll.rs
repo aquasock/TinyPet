@@ -406,6 +406,8 @@ struct Walker {
     ear_radius: f32,
     ear_sink: f32,
     ear_bias: f32,
+    /// How far apart the two ears sit, in body units.
+    ear_width: f32,
     /// Last movement input, so the pose knows whether to animate a gait.
     moving: f32,
 }
@@ -460,6 +462,7 @@ impl Walker {
             ear_radius: 33.0,
             ear_sink: 0.35,
             ear_bias: -6.0,
+            ear_width: 10.0,
             moving: 1.0,
         }
     }
@@ -558,7 +561,7 @@ impl Walker {
                 let bias = if near { self.ear_bias } else { 0.0 };
                 for i in [base, tip] {
                     if let Some(p) = doll.particles.get_mut(i) {
-                        p.side = sign * 10.0;
+                        p.side = sign * self.ear_width;
                         p.z_bias = bias;
                     }
                 }
@@ -688,9 +691,10 @@ fn eye_pixel_ok(
 
 fn report_ears(w: &Walker) {
     println!(
-        "ears: angle {:.0} deg  radius {:.1}  sink {:.2}  bias {:.1}",
+        "ears: angle {:.0} deg  radius {:.1}  width {:.1}  sink {:.2}  bias {:.1}",
         w.ear_angle.to_degrees(),
         w.ear_radius,
+        w.ear_width,
         w.ear_sink,
         w.ear_bias
     );
@@ -786,7 +790,8 @@ fn main() -> Result<(), String> {
     println!(
         "drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
          light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
-         ears: H/J radius, K/L angle, PgUp/PgDn sink, U/I bias   Tab: ball numbers\n\
+         ears: H/J radius, K/L angle, N/M width, PgUp/PgDn sink, U/I bias\n\
+         Tab: ball numbers\n\
          P: settings   R: reset   Space: pause   Esc: quit"
     );
     report(light, steps, tex_idx, textures[tex_idx].0);
@@ -902,6 +907,14 @@ fn main() -> Result<(), String> {
                     }
                     sdl2::keyboard::Keycode::PageDown => {
                         walker.ear_sink = (walker.ear_sink - 0.05).max(0.0);
+                        report_ears(&walker);
+                    }
+                    sdl2::keyboard::Keycode::N => {
+                        walker.ear_width = (walker.ear_width - 0.5).max(0.0);
+                        report_ears(&walker);
+                    }
+                    sdl2::keyboard::Keycode::M => {
+                        walker.ear_width = (walker.ear_width + 0.5).min(26.0);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::U => {
