@@ -1,4 +1,4 @@
-# Handoff - creature head: eyes and ears - 2026-10-29
+# Handoff - the creature, and the surface it lives on - 2026-10-29
 
 Read this as orientation, not law. Refresh live state (`git status`, `git log`,
 `cargo test --workspace`) before acting on it. The living record is
@@ -6,94 +6,79 @@ Read this as orientation, not law. Refresh live state (`git status`, `git log`,
 
 ## State
 
-- **Eyes: settled.** Three nested shells - lid, sclera, pupil+iris - placed by
-  angle round the skull. Verified from every heading by the user, then frozen.
-- **Ears: settled for now.** Two balls a side, base and lighter tip, ordinary
-  pinned body segments. Pushed.
-- **Nose: not started.** The retail game was run tonight for reference and was
-  not copied; the plan is our own nose and mouth, not retail's.
-- **The surface is 320x240**, the animal drawn at half its authored size, with
-  two windows onto it: dev (640x480, default) and low-end (`PETZ_MODE=low`,
-  320x240 at 1:1). This is the baseline to work from - see "Resolution" below.
+- **The animal is a soft body of 48 balls**: spine 0-3, head 4-6, ears 7-10,
+  eyes 11-14, four legs 15-42 (hip, knee, foot, four claws each), tail 43-47.
+- **Walking works again** - `W`/`S`, `A`/`D` - and there is no animation beyond
+  the gait: the tail hangs and swings on physics only, and the ears are rigidly
+  placed.
+- **The surface is 320x240**, the animal at half its authored size, in two
+  window modes.
+- Tree clean, `main` level with `origin/main` at `fefa649`.
 
-## Landed tonight
+## Landed since the last handoff
 
-57 commits, `78f67d3` (00:11) .. `ae1d50d` (03:14), all on `main`, all pushed.
-The shape of it:
+`ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`, all pushed:
 
-- depth buffer replaces the painter's sort; one rasterizer for every ball
-- rims drawn as a flat backing disc, not a second sphere
-- the eye rebuilt as three shells, lid rule included
-- head trimmed back to a single ball
-- ears tried as eye copies, then as angle-placed balls, then settled as two
-  pinned body balls per side with the depth rule the eyes are exempt from
-- `ae1d50d` adds the lighter tip ball
+- the ears locked down: bases at (-2, 28), apart 14, radius 9.5; tips 12 above,
+  radius 6.5, sunk 0.2; no live keys
+- the surface cut to 320x240 with dev (2x window) and low-end (1:1) modes, and
+  `PETZ_SCALE` / `PETZ_ZOOM` / `PETZ_MODE` / `PETZ_WINDOW` overrides
+- four claws a foot, hips derived from their spine ball, the tail reworked into
+  a held root plus a free chain
+- a constraint overlay (`G`), shift-drag to carry the animal, and the spine's
+  redundant diagonals removed
 
 ## Verified, and how
 
-- `cargo test --workspace`: 62 tests, all green (39 core, 2 silhouette, 21 in
-  the sandbox binary). Counts test expects 48 balls, 11 on the head, sixteen claws, five tail balls.
-- Ear tips: given a diagnostic colour no body ramp can reach, the framebuffer
-  was dumped at 0/90/180/270 and pixels counted - 304 of 308 expected head on,
-  and the two tips share a screen x in profile. Colour set back to 100 after.
-- Not verified by eye: how the tip reads as a shape, and whether the head's
-  outline blends as cleanly at the tip as it does at the base. The user last
-  looked at the base-only ear.
+- `cargo test --workspace`: 68 tests green (39 core, 2 silhouette, 25 in the
+  sandbox binary, 2 misc). The counts test expects 48 balls, 11 on the head,
+  sixteen claws, five tail balls.
+- Tail liveliness, measured as degrees of travel after a turn ends: 75 with the
+  tail's own damping against 20 damped like the body.
+- Hips, measured against a rigid body through a full-rate turn: 0.2-1.1 px, and
+  the hip-to-spine gap fixed at its authored 20 units.
+- Outline weight, counted from a frame: 2 px in 52% of runs, 3 px in 20% (where
+  two rims meet).
+- Not verified by eye: the animal in `PETZ_MODE=low` after the last few changes.
+  It was looked at once at 320x240 and judged good, before the ear links and the
+  spine simplification.
 
 ## Decisions a fresh session must not re-litigate
 
-- Projection is orthographic with a 25 degree pitch. No perspective divide: the
-  captured balls only ever had 23 distinct diameters and every rect was square.
-- Depth buffer, not painter's sort. Deliberate departure from the original.
-- The eye is three shells with the rule "when the inner shells are not visible,
-  the lid's open half fills with fur". That is what stops the eye popping.
-- The head is one ball. A seven-ball cluster was tried and removed.
-- Ears are placed by `pose()`, pinned, with `z_bias = (skull_depth - 1) - ear_depth`.
-  They are not shells, not a bespoke sort key, and not angle-placed like eyes.
-- Neither the eyes nor the ears have live keys. The ears were tuned from the
-  keyboard and the settled numbers are now `EAR_*` constants with a test that
-  pins them; `P` prints them next to the eye numbers.
-
-## Known wrong or unproven
-
-- The ear tip is a cap, not a flop: pinned means rigid. Retail has six balls an
-  ear; ours is two, deliberately.
-- The snout is the one part that bulges out of the skull on purpose: skull
-  radius 26, muzzle radius 13 with its centre 24 from the skull's, so it stands
-  about 11 proud. The part inside the head is hidden per pixel by depth, which
-  is the point - there is no containment rule left to lean on.
-- No mouth, no tongue, no tail detail beyond four balls.
-- Physics is sagittal only - lateral motion is authored - and feet slide during
-  a turn instead of stepping.
-
-## Resolution and modes
-
-The renderer is 320x240 with one projection pixel per surface pixel. That
-surface is presented two ways, and the renderer is identical in both:
-
-- **dev** (default) - window 640x480, the surface doubled, for working on it
-- **low** (`PETZ_MODE=low`) - window 320x240 at 1:1, the low-end target
-
-`PETZ_SCALE=n` overrides the window multiplier, `PETZ_ZOOM=n` the animal's size
-(default 0.5), `PETZ_WINDOW=x,y` the launch position, `PETZ_DIAG` the ear/rim
-diagnostic colours. Halving the surface cost nothing in the rasterizer: the span
-table was captured at the 640x480 diameters and every diameter in use is inside
-its range.
+- Projection is orthographic with a 25 degree pitch. No perspective divide.
+- Depth buffer, not painter's sort.
+- **Anything drawn in another ball's frame is *derived* from that ball, heading
+  included** - not eased separately. This cost three attempts on the hips; the
+  failure mode is a part that swings off the body and snaps back.
+- **Sway is lag x distance.** A part far from the body's origin needs a
+  proportionally shorter lag to match one near it.
+- The ears are pinned and placed exactly (the pair must not drift apart), and
+  linked to the skull so a pulled ear drags the head. They snap back on release
+  in one frame; that is the accepted cost, not a bug.
+- The tail is one held root and four free balls, with soft links and a
+  per-ball `drag` multiplier of about 0.998/0.985. Driving the chain makes a rod;
+  leaving the root slack drops the tail under the cat.
+- The spine is a plain chain plus one brace (skull to spine[2]). Its diagonals
+  were measured at 2.4 degrees of fold and removed.
+- Palette is a diagnostic set: black fur, snout and ear bases blue (240), nose
+  pink (70), white on 0, 2, 8, 10, 17, 20, 23, 26, 44, 46, and black elsewhere.
+  `PETZ_DIAG` still paints the second ear and every rim, and the hips.
 
 ## Next step
 
-Start the nose from the breed data in `docs/SANDBOX.md` ("Next: the nose"): a
-nose ball plus two nostrils, with the retail asymmetry in nostril colour checked
-against a capture before any of it is trusted.
+The roadmap the user agreed, in order: **tail and ear motion** (a slow sway on
+the tail's root target, then gait coupling; the ears want the same `drag`
+treatment so they are livelier than the body), then **the face** - mouth,
+tongue, and eyelid states for excited, playful, sad, scared.
 
 ## Continuation
 
-- Sandbox binary: `rust/petz-sdl/src/bin/ragdoll.rs` (~1700 lines). Build with
-  `cargo build --release -p petz-sdl --bin ragdoll`.
-- A sandbox may still be running on `:0.0` under the window name
-  "petz ragdoll sandbox". It no longer positions itself: pass
-  `PETZ_WINDOW=x,y` to place it at creation, or let the window manager pick.
-  Do not move it after it appears - that is the jump the user sees.
-- Instruments: `PETZ_HEADING=<deg>` pins facing, `PETZ_DUMP_PPM=1` writes
-  `/tmp/ours.ppm`, `PETZ_SWEEP=1` rotates and logs. `xwd` on an overlapped
-  window captures the composited desktop, so count pixels in the PPM instead.
+- Build: `cargo build --release -p petz-sdl --bin ragdoll`.
+- Dev window: `./target/release/ragdoll`. Low-end: `PETZ_MODE=low`.
+- `G` toggles the constraint overlay; `Tab` numbers the balls; `P` prints the
+  setup; `Shift`+drag carries the animal; plain drag pokes one ball.
+- Instruments: `PETZ_HEADING=<deg>` pins the facing, `PETZ_DUMP_PPM=1` writes
+  `/tmp/ours.ppm`, `PETZ_SWEEP=<rad/s>` rotates steadily, `PETZ_DIAG=1` paints
+  the diagnostic colours. Dump pixel counts, do not trust a window grab.
+- Watch for stale instances: several ragdolls at once all write `/tmp/ours.ppm`,
+  which silently corrupts any measurement. `pgrep -x ragdoll` first.
