@@ -817,8 +817,32 @@ static void dump_tables(void)
     slog(buf);
 }
 
+static HANDLE g_block_log = INVALID_HANDLE_VALUE;
+
 void fill_probe(void *drawport, void *block)
 {
+    /* Recording every fill's render block is opt-in: doing file I/O on the
+     * render thread with this frequency crashed the retail game (c0000005 via
+     * Verbassert). The safe path is the interval capture further down. */
+    char bl[8];
+    static int blocklog = -1;
+    if (blocklog < 0)
+        blocklog = GetEnvironmentVariableA("PETZ_BLOCKLOG", bl, sizeof(bl)) > 0 ? 1 : 0;
+    if (blocklog && block) {
+        if (g_block_log == INVALID_HANDLE_VALUE)
+            g_block_log = CreateFileA("blocks.bin", GENERIC_WRITE, FILE_SHARE_READ,
+                                      NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (g_block_log != INVALID_HANDLE_VALUE) {
+            unsigned char rec[72];
+            memcpy(rec, block, 64);
+            DWORD dp = (DWORD)(ULONG_PTR)drawport;
+            memcpy(rec + 64, &dp, 4);
+            DWORD frame = (DWORD)g_fill_calls;
+            memcpy(rec + 68, &frame, 4);
+            DWORD n;
+            WriteFile(g_block_log, rec, sizeof(rec), &n, NULL);
+        }
+    }
     LONG n = InterlockedIncrement(&g_fill_calls);
     if (!block) return;
 
