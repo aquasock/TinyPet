@@ -248,6 +248,10 @@ fn build() -> (Ragdoll, Creature) {
         for i in [base, tip] {
             r.particles[i].side = 10.0 * side;
             r.particles[i].rest_side = 10.0 * side;
+            // Ears sit on the head, so they are drawn as if a little nearer.
+            // Without this the skull's own surface wins wherever they overlap
+            // and the ear looks like it is under the skin.
+            r.particles[i].z_bias = -6.0;
         }
         // Settle the tip a sixth of the way down into its base, before the link
         // is made, so the spring is built at the length that actually exists.
@@ -1079,7 +1083,7 @@ fn main() -> Result<(), String> {
             let r = p.radius.round() as i32;
             if r < 1 { continue; }
             let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
-            let cd = screen[i].depth;
+            let cd = screen[i].depth + p.z_bias;
             if !p.no_rim {
                 // A filled disc behind the body, not a ring: the body is
                 // nearer, covers the middle, and the rim survives as the

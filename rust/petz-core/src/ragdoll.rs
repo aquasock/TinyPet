@@ -73,6 +73,10 @@ pub struct Particle {
     /// The authored lateral offset, so a drag can be undone. Side is not
     /// simulated, so nothing else would ever pull a dragged ball back.
     pub rest_side: f32,
+    /// Depth bias in world units. Negative pulls the ball towards the viewer,
+    /// which is how a part that sits *on* another is kept from being swallowed
+    /// by it - the ears against the skull.
+    pub z_bias: f32,
     /// Draw no rim at all. The nose is black against black, where an outline
     /// in the body's rim colour reads as a brown ring around it.
     pub no_rim: bool,
@@ -97,6 +101,7 @@ impl Particle {
             follow: 0.0,
             side: 0.0,
             rest_side: 0.0,
+            z_bias: 0.0,
             no_rim: false,
             rim: 0,
             layer: 0,
