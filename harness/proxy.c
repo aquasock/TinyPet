@@ -188,6 +188,85 @@ static void dump_surface(const Surface *s, long frame)
     CloseHandle(f);
 }
 
+/* ---- paired capture: pixels + the blocks that produced them -------------
+ * The decisive experiment for pass semantics. At a frame marker we dump the
+ * scene surface and record which ring slot that marker occupies. Offline we
+ * take dump i, apply every recorded block between marker i and marker i+1,
+ * and diff that against dump i+1. No alignment guesswork: a mismatch points
+ * at the exact pass we mis-modelled.
+ */
+static int g_fd_every = 0, g_fd_parsed = 0, g_fd_limit = 600;
+static volatile DWORD g_last_drawport = 0;
+static long g_fd_calls = 0, g_fd_idx = 0;
+
+static void fd_parse(void)
+{
+    char v[16];
+    if (g_fd_parsed) return;
+    g_fd_every = GetEnvironmentVariableA("PETZ_FRAMEDUMP", v, sizeof(v)) > 0
+                 ? (int)atoi(v) : 0;
+    /* Menu screens redraw constantly and would eat the whole budget, so a
+     * session can raise it. 2 MB per dump: 2000 is 4 GB. */
+    if (GetEnvironmentVariableA("PETZ_FRAMEDUMP_LIMIT", v, sizeof(v)) > 0)
+        g_fd_limit = (int)atoi(v);
+    g_fd_parsed = 1;
+    if (g_fd_every > 0) slog("framedump: paired capture on");
+}
+
+static void dump_pair(LONG slot, void *sprite)
+{
+    if (g_fd_every <= 0 || g_fd_idx >= g_fd_limit) return;
+
+    /* Which surface the pets draw into is not something to guess at: the
+     * fills name a single drawport, and surface geometry alone does not
+     * identify it (the screen-sized surface turns out to be static). Dump
+     * every live 8bpp surface with its address and let the offline pass pick
+     * the one that actually moves. */
+    int wrote = 0;
+    for (int i = 0; i < g_surf_count; i++) {
+        Surface *s = &g_surf[i];
+        if (!s->bits || s->bpp != 8 || s->width == 0 || s->height == 0) continue;
+
+        char name[64], *q = name;
+        lstrcpyA(q, "pf-"); q += 3;
+        q = put_uint(q, (unsigned long)g_fd_idx); *q++ = '-';
+        q = put_uint(q, (unsigned long)i);
+        lstrcpyA(q, ".raw"); q += 4;
+        *q = 0;
+
+        HANDLE f = CreateFileA(name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                               FILE_ATTRIBUTE_NORMAL, NULL);
+        if (f == INVALID_HANDLE_VALUE) continue;
+        DWORD n, hdr[7] = { (DWORD)s->width, (DWORD)s->height, (DWORD)s->bpp,
+                            (DWORD)s->stride, (DWORD)g_fd_idx, (DWORD)s->has_pal,
+                            (DWORD)(ULONG_PTR)s->bits };
+        WriteFile(f, hdr, sizeof(hdr), &n, NULL);
+        if (s->has_pal) WriteFile(f, s->pal, 256 * 4, &n, NULL);
+        DWORD want = (DWORD)(s->stride * s->height);
+        BOOL ok = WriteFile(f, s->bits, want, &n, NULL);
+        CloseHandle(f);
+        if (!ok || n != want) continue;
+
+        HANDLE ix = CreateFileA("pf-index.txt", FILE_APPEND_DATA, 0, NULL,
+                                OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (ix == INVALID_HANDLE_VALUE) continue;
+        char line[128], *p = line;
+        p = put_uint(p, (unsigned long)g_fd_idx); *p++ = ' ';
+        p = put_uint(p, (unsigned long)slot);     *p++ = ' ';
+        p = put_uint(p, (unsigned long)i);        *p++ = ' ';
+        p = put_hex64(p, (unsigned long long)(ULONG_PTR)s->bits); *p++ = ' ';
+        p = put_uint(p, (unsigned long)s->width); *p++ = 'x';
+        p = put_uint(p, (unsigned long)s->height); *p++ = ' ';
+        p = put_hex64(p, (unsigned long long)g_last_drawport);
+        *p++ = '\n';
+        WriteFile(ix, line, (DWORD)(p - line), &n, NULL);
+        CloseHandle(ix);
+        wrote++;
+    }
+    if (wrote) g_fd_idx++;
+    else if (g_fd_parsed < 2) { g_fd_parsed = 2; slog("framedump: no live 8bpp surface"); }
+}
+
 static void note_present(const char *api, int cx, int cy)
 {
     LONG frame = InterlockedIncrement(&g_presents) - 1;
@@ -235,6 +314,18 @@ static void note_present(const char *api, int cx, int cy)
                 best = s;
         }
         if (best) { dump_surface(best, frame); g_dumps++; }
+    }
+
+    /* Paired capture: pixels on one side, the block ring position on the
+     * other. Done here rather than at the frame marker because this is the
+     * one place surface memory is known live. */
+    fd_parse();
+    if (g_fd_every > 0) {
+        LONG c = InterlockedIncrement(&g_fd_calls) - 1;
+        if (c % g_fd_every == 0) {
+            LONG slot = InterlockedCompareExchange(&g_ring_pos, 0, 0) - 1;
+            if (g_ring && slot >= 0 && slot < RING_RECS) dump_pair(slot, (void *)0);
+        }
     }
 }
 
@@ -539,12 +630,6 @@ void disp_probe(void *sprite, void *ballstates)
                      ? (int)atoi(v) : 0;
         g_fd_parsed = 1;
     }
-    if (g_fd_every > 0) {
-        LONG slot2 = InterlockedIncrement(&g_fd_calls) - 1;
-        if (slot2 % g_fd_every == 0 && g_marker_slot >= 0)
-            dump_pair(g_marker_slot, sprite);
-    }
-
     if (!ballstates || g_disp_dumps >= 3) return;
     char name[48], *q = name;
     lstrcpyA(q, "ballstate-"); q += lstrlenA(q);
@@ -562,64 +647,6 @@ void disp_probe(void *sprite, void *ballstates)
     lstrcpyA(p, "ballstates dumped -> "); p += lstrlenA(p);
     lstrcpynA(p, name, 30);
     slog(buf);
-}
-
-/* ---- paired capture: pixels + the blocks that produced them -------------
- * The decisive experiment for pass semantics. At a frame marker we dump the
- * scene surface and record which ring slot that marker occupies. Offline we
- * take dump i, apply every recorded block between marker i and marker i+1,
- * and diff that against dump i+1. No alignment guesswork: a mismatch points
- * at the exact pass we mis-modelled.
- */
-static int g_fd_every = 0, g_fd_parsed = 0;
-static long g_fd_calls = 0, g_fd_idx = 0;
-
-static void dump_pair(LONG slot, void *sprite)
-{
-    int sw = GetSystemMetrics(SM_CXSCREEN);
-    int sh = GetSystemMetrics(SM_CYSCREEN);
-    Surface *best = NULL;
-    for (int i = 0; i < g_surf_count; i++) {
-        Surface *s = &g_surf[i];
-        if (!s->bits || s->bpp != 8) continue;
-        if (s->width == sw && s->height == sh) { best = s; break; }
-        if (!best || (long)s->width * s->height > (long)best->width * best->height)
-            best = s;
-    }
-    if (!best) return;
-
-    char name[80], *q = name;
-    lstrcpyA(q, "pf-"); q += 3;
-    q = put_uint(q, (unsigned long)g_fd_idx);
-    *q++ = '.';
-    lstrcpyA(q, "raw"); q += 3;
-    *q = 0;
-
-    HANDLE f = CreateFileA(name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
-                           FILE_ATTRIBUTE_NORMAL, NULL);
-    if (f == INVALID_HANDLE_VALUE) return;
-    DWORD n, hdr[6] = { (DWORD)best->width, (DWORD)best->height, (DWORD)best->bpp,
-                        (DWORD)best->stride, (DWORD)g_fd_idx, (DWORD)best->has_pal };
-    WriteFile(f, hdr, sizeof(hdr), &n, NULL);
-    if (best->has_pal) WriteFile(f, best->pal, 256 * 4, &n, NULL);
-    DWORD want = (DWORD)(best->stride * best->height);
-    BOOL ok = WriteFile(f, best->bits, want, &n, NULL);
-    CloseHandle(f);
-    if (!ok || n != want) return;
-
-    HANDLE ix = CreateFileA("pf-index.txt", FILE_APPEND_DATA, 0, NULL, OPEN_ALWAYS,
-                            FILE_ATTRIBUTE_NORMAL, NULL);
-    if (ix == INVALID_HANDLE_VALUE) return;
-    char line[96], *p = line;
-    p = put_uint(p, (unsigned long)g_fd_idx); *p++ = ' ';
-    p = put_uint(p, (unsigned long)slot);     *p++ = ' ';
-    p = put_uint(p, (unsigned long)(ULONG_PTR)sprite); *p++ = ' ';
-    p = put_uint(p, (unsigned long)best->width); *p++ = 'x';
-    p = put_uint(p, (unsigned long)best->height);
-    *p++ = '\n';
-    WriteFile(ix, line, (DWORD)(p - line), &n, NULL);
-    CloseHandle(ix);
-    g_fd_idx++;
 }
 
 extern void frame_post_entry(void);
@@ -986,6 +1013,7 @@ static void dump_tables(void)
 void fill_probe(void *drawport, void *block, int kind)
 {
     LONG n = InterlockedIncrement(&g_fill_calls);
+    g_last_drawport = (DWORD)(ULONG_PTR)drawport;
     /* Recording every fill's render block is opt-in: doing file I/O on the
      * render thread with this frequency crashed the retail game (c0000005 via
      * Verbassert). The safe path is the interval capture further down. */
