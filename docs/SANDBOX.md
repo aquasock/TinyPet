@@ -96,9 +96,12 @@ is asserted as a regression test.
 - **Eyelids are removed.** Petz has no lid geometry — it parameterises one with
   `[Eyelid Color]` plus per-eye "eyelid height" and "eyelid tilt". Our lid-ball
   approximation was visible above the eye and read as a small ear.
-- **Eyes still clip at some angles.** The head is a single oversized ball, and
-  the occlusion test compares the eye against that one sphere only. Real eyes
-  sit in a socket formed by several balls.
+- **The head is a cluster now, and the eye clips against all of it.** Seven
+  balls — cranium, brow, two cheeks, jowl, muzzle, nose — so the eye is occluded
+  by whichever ball is actually in front of it rather than by one oversized
+  sphere. It still clips a little eagerly at some placements, which is what the
+  depth bias (`U`/`I`) is for; that bias is a deliberate fudge, not a more
+  correct occluder.
 - **Physics is sagittal-only.** The solver runs in the animal's own plane;
   lateral offsets are authored, not simulated. A turning dog's tail swings
   fore-and-aft, not across the screen.
@@ -129,8 +132,9 @@ vanishing at the wrong angle:
 
 The eye is now one unit drawn in order - outline, sclera, iris ring, pupil -
 every layer through the same per-pixel clip, so all four go behind the head
-together. Placement is angle (27 degrees) and radius (31) on a head of 26, both
-live-tunable.
+together. Placement is by angle round the head (27 degrees) and radius (22)
+against an 18-pixel cranium, both live-tunable, with a depth bias in the eye's
+favour on top.
 
 ## Reference findings worth keeping
 
