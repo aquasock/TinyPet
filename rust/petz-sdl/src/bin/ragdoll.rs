@@ -559,16 +559,17 @@ impl Walker {
                 tx += self.ear_sink * (bx - tx);
                 ty += self.ear_sink * (by - ty);
                 doll.drag_to(tip, Vec2::new(tx, ty));
-                // Only the ear on the viewer's side gets the bias. The one
-                // round the back takes none, so the head hides it properly -
-                // which is what makes the near ear look attached rather than
-                // painted over the top.
-                let near = -self.heading_body.sin() * sign <= 0.0;
-                let bias = if near { self.ear_bias } else { 0.0 };
+                // Both ears take the bias, so both sit on the head the same way
+                // at every angle. Giving it only to the near ear made them
+                // behave differently: the far one was half-hidden by the skull
+                // and showed as a fragment floating beside it, while the near
+                // one was drawn whole. They are ordered against each other by
+                // the depth buffer, which is the only difference that should
+                // exist between them.
                 for i in [base, tip] {
                     if let Some(p) = doll.particles.get_mut(i) {
                         p.side = sign * self.ear_width;
-                        p.z_bias = bias;
+                        p.z_bias = self.ear_bias;
                     }
                 }
                 // Let the springs follow the drive. Held at the lengths they
