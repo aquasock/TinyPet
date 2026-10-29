@@ -1104,6 +1104,7 @@ fn main() -> Result<(), String> {
             .iter()
             .copied()
             .chain(creature.eye_overlays.iter().map(|(_, o)| *o))
+            .chain(creature.ears.iter().flat_map(|&(s, i, _)| [s, i]))
             .collect();
 
         // ---- ordinary balls --------------------------------------------------
@@ -1138,7 +1139,11 @@ fn main() -> Result<(), String> {
         // ---- eyes: three shells ---------------------------------------------
         let heading = walker.heading_body;
         let (pc, ps) = (view.pitch.cos(), view.pitch.sin());
-        for &(sclera, iris, _y, _sign) in &creature.eye_parts {
+        let mut groups: Vec<(usize, usize)> =
+            creature.eye_parts.iter().map(|&(s, i, _, _)| (s, i)).collect();
+        groups.extend(creature.ears.iter().map(|&(s, i, _)| (s, i)));
+        groups.sort_by(|a, b| screen[b.0].depth.partial_cmp(&screen[a.0].depth).unwrap());
+        for &(sclera, iris) in &groups {
             let sp = &doll.particles[sclera];
             let cp = &doll.particles[creature.skull];
             let eh = walker.facing.get(sclera).copied().unwrap_or(heading);
