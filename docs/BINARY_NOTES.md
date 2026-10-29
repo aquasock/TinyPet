@@ -497,6 +497,33 @@ This is the sharpest statement of the reproduction problem available so far:
 the silhouette is table-driven, and the remaining difference is a small integer
 effect in a specific row range rather than any analytic shape question.
 
+### Ball data and fur art
+
+**[verified]** `Catz 4 Rez.dll` holds **493 `BDT` entries** totalling 11.2 MB
+(`CAT0`, `CAT1`, ...), plus one 67 KB `BHD`. Each `BDT` entry begins:
+
+```
+offset 0 : uint32  total size of the entry (matches the file length exactly)
+offset 4 : uint16  version (15)
+offset 6 : "PFM_[V4.015] (c) 1999 The Learning Company Properties, Inc.
+            (Hi Mom, indeed!)"
+then     : per-frame ball data
+```
+
+**[verified]** Each breed carries its own art: one `BMP` texture plus two `LNZ`
+resources. The texture is small - `POUNCER` in `B+W Shorthair.cat` is 105x89
+8bpp, the same dimensions as `COTTON` in `Bunny.cat`.
+
+So the fur is a single ~105x89 indexed image per breed, mapped across the body.
+That is consistent with the on-screen measurement (smooth shade field plus
+per-pixel index detail) and it bounds the problem: the texture is small enough
+to be examined exhaustively.
+
+**[inferred]** The `BDT` payload is per-frame ball geometry - positions, sizes
+and deformations - while colour comes from the breed `BMP` plus `LNZ` fur
+info. If so, reproducing a ball needs three things: the span table (known), the
+per-frame geometry (BDT, not yet decoded), and the texture mapping (unknown).
+
 ## Oracle harness: what it took to get a stable frame
 **[verified]** These are hard-won operating facts. Each one cost a failed run.
 
