@@ -70,6 +70,13 @@ pub struct Particle {
     /// in the animal's sagittal plane, so this is authored rather than
     /// simulated: it is what puts a left leg to the left of a right one.
     pub side: f32,
+    /// Colour of the rim drawn around this ball. The retail data carries a
+    /// per-ball outline colour, and the eye uses it for the iris ring.
+    pub rim: u8,
+    /// Render layer. 0 is the body, drawn in depth order; higher layers are
+    /// drawn afterwards. The eye iris needs this: it must sit on its own
+    /// sclera whatever the depth says.
+    pub layer: u8,
 }
 
 impl Particle {
@@ -83,6 +90,8 @@ impl Particle {
             target: None,
             follow: 0.0,
             side: 0.0,
+            rim: 0,
+            layer: 0,
         }
     }
 

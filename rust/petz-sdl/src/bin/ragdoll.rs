@@ -39,6 +39,12 @@ const OUTLINE: u8 = 89;
 const BODY: u8 = 61;
 const LIGHT: u8 = 10;
 const DARK: u8 = 0;
+/// Retail `;L eye` colour: white sclera.
+const SCLERA: u8 = 245;
+/// Retail `;L iris` colour: black pupil, with the iris ring drawn as its
+/// outline colour. Teal is the Dalmatian's; any breed colour works.
+const IRIS: u8 = 244;
+const IRIS_RING: u8 = 6;
 
 /// Where the floor is. Feet stand on this line.
 const GROUND: f32 = 218.0;
@@ -135,6 +141,23 @@ fn build() -> (Ragdoll, Creature) {
     // A second brace, so the head cannot nod away from the shoulders.
     r.link(skull, spine[spine.len() - 2]);
 
+    // Eyes. The retail data is two balls per eye: a white sclera and a black
+    // pupil whose *outline* is the iris, in a per-breed colour. There is no
+    // eyelid ball at all - Petz parameterises the lid instead.
+    let mut eyes = Vec::new();
+    for side in [-9.0f32, 9.0f32] {
+        let sclera = r.add(Particle::new(392.0, base_y - 32.0, 10.0, SCLERA));
+        let iris = r.add(Particle::new(392.0, base_y - 31.0, 6.0, IRIS));
+        for i in [sclera, iris] {
+            r.particles[i].side = side;
+        }
+        r.particles[iris].rim = IRIS_RING;
+        r.particles[iris].layer = 1;
+        r.link(skull, sclera);
+        eyes.push(sclera);
+        eyes.push(iris);
+    }
+
     let ear_a = r.add(Particle::new(380.0, base_y - 48.0, 9.0, BODY));
     let ear_b = r.add(Particle::new(394.0, base_y - 44.0, 9.0, BODY));
     r.link(skull, ear_a);
@@ -178,7 +201,8 @@ fn build() -> (Ragdoll, Creature) {
     r.particles[ear_a].side = -6.0;
     r.particles[ear_b].side = 6.0;
 
-    let head = vec![skull, muzzle, nose, ear_a, ear_b];
+    let mut head = vec![skull, muzzle, nose, ear_a, ear_b];
+    head.extend(eyes);
     (r, Creature { spine, legs, head, tail })
 }
 
@@ -619,38 +643,49 @@ fn main() -> Result<(), String> {
             }
         }
 
+        // Depth order within each layer; layers ascend afterwards. The eye
+        // iris lives on layer 1 so it lands on its own sclera no matter what
+        // the depth says.
         let mut order: Vec<usize> = (0..doll.particles.len()).collect();
         order.sort_by(|&a, &b| {
-            screen[b].depth.partial_cmp(&screen[a].depth).unwrap()
+            let (la, lb) = (doll.particles[a].layer, doll.particles[b].layer);
+            la.cmp(&lb).then(
+                screen[b].depth.partial_cmp(&screen[a].depth).unwrap(),
+            )
         });
 
-        // Rim over the whole body, then shaded bodies, so overlaps do not leave
-        // a dark ring round each individual ball.
-        for &i in &order {
-            let p = &doll.particles[i];
-            let r = p.radius.round() as i32;
-            if r < 1 { continue; }
-            let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
-            fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), OUTLINE);
-        }
-        for &i in &order {
-            let p = &doll.particles[i];
-            let r = p.radius.round() as i32;
-            if r < 1 { continue; }
-            let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
-            let alt = match p.colour {
-                BODY => LIGHT,
-                LIGHT => BODY,
-                other => other,
-            };
-            let pattern = Pattern {
-                base: ramps.get(&p.colour).cloned().unwrap_or_else(|| Ramp::new(vec![p.colour])),
-                alt: ramps.get(&alt).cloned().unwrap_or_else(|| Ramp::new(vec![alt])),
-                texture: textures[tex_idx].1.clone(),
-                threshold: 128,
-                phase: 0.0,
-            };
-            shade_disc_pattern(&mut surface, &table, cx, cy, (r * 2) as usize, light, &pattern);
+        // Rim then bodies, per layer. Doing all rims first would let a body in
+        // a lower layer paint over a higher layer's rim - which is exactly what
+        // happened to the iris ring.
+        let max_layer = doll.particles.iter().map(|p| p.layer).max().unwrap_or(0);
+        for layer in 0..=max_layer {
+            for &i in order.iter().filter(|&&i| doll.particles[i].layer == layer) {
+                let p = &doll.particles[i];
+                let r = p.radius.round() as i32;
+                if r < 1 { continue; }
+                let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
+                let rim = if p.rim == 0 { OUTLINE } else { p.rim };
+                fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), rim);
+            }
+            for &i in order.iter().filter(|&&i| doll.particles[i].layer == layer) {
+                let p = &doll.particles[i];
+                let r = p.radius.round() as i32;
+                if r < 1 { continue; }
+                let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
+                let alt = match p.colour {
+                    BODY => LIGHT,
+                    LIGHT => BODY,
+                    other => other,
+                };
+                let pattern = Pattern {
+                    base: ramps.get(&p.colour).cloned().unwrap_or_else(|| Ramp::new(vec![p.colour])),
+                    alt: ramps.get(&alt).cloned().unwrap_or_else(|| Ramp::new(vec![alt])),
+                    texture: textures[tex_idx].1.clone(),
+                    threshold: 128,
+                    phase: 0.0,
+                };
+                shade_disc_pattern(&mut surface, &table, cx, cy, (r * 2) as usize, light, &pattern);
+            }
         }
 
         let rgb = palette.to_rgb(&surface);
