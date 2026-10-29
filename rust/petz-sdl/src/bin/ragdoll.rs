@@ -1107,27 +1107,31 @@ fn main() -> Result<(), String> {
             shade_disc_pattern_masked(&mut surface, &table, px, iy,
                 (ri as i32 * 2) as usize, light, &iris_pattern, &clip);
 
-            // Shell 1, outermost: the eyelid. A line across the eye dividing
-            // coat colour from open eye, so the eye still reads as an eye when
-            // the pupil has slid out of sight. Drawn last, so it covers both the
-            // white and the pupil.
+        }
+
+        // Shell 1, outermost, and the only one with no cull. The lid is a patch
+        // of coat colour on the outside of the eye, so drawing it when the rest
+        // of the eye has gone is harmless: over the head it is the same colour
+        // as the head and invisible, and where the eye stands against something
+        // else it is exactly the outline that should stay. That is what keeps
+        // the eye from winking out of existence.
+        for &(sclera, _iris, _y, _sign) in &creature.eye_parts {
+            let sp = &doll.particles[sclera];
+            let (cx, cy) = (screen[sclera].x, screen[sclera].y);
+            let re = sp.radius.max(1.0);
+            let ix = cx.round() as i32;
+            let iy = cy.round() as i32;
             let drop = walker.lid_drop.clamp(0.0, 1.0);
             let tilt = walker.lid_tilt;
             let line = re * (1.0 - 2.0 * drop);
-            let lid_clip = {
-                let geo = head_geo.clone();
-                move |x: i32, y: i32| -> bool {
-                    let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-                    let (ux, uy) = (fx - cx, fy - cy);
-                    if ux * ux + uy * uy > re * re {
-                        return false;
-                    }
-                    if uy >= -(line + ux * tilt.tan()) {
-                        return false;
-                    }
-                    let eye_surface = de - (re * re - (ux * ux + uy * uy)).max(0.0).sqrt();
-                    eye_pixel_ok(&geo, fx, fy, eye_surface, bias)
+            let lid_clip = move |x: i32, y: i32| -> bool {
+                let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                let (ux, uy) = (fx - cx, fy - cy);
+                if ux * ux + uy * uy > re * re {
+                    return false;
                 }
+                // Screen y grows downwards; the lid covers above the line.
+                uy < -(line + ux * tilt.tan())
             };
             let lid_pattern = pattern_for(BODY);
             shade_disc_pattern_masked(&mut surface, &table, ix, iy,
