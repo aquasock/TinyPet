@@ -253,8 +253,10 @@ fn build() -> (Ragdoll, Creature) {
         }
         r.particles[iris].rim = IRIS_RING;
         r.particles[iris].layer = 1;
-        r.link(skull, sclera);
-        r.link(sclera, iris);
+        // Deliberately unlinked. They are pinned and placed every frame, so a
+        // spring serves no purpose - and a pinned end pushes its whole
+        // correction into the other end, so the skull was being dragged around
+        // by the ears instead of the ears moving freely.
         ear_parts.extend([sclera, iris]);
         ear_eyes.push((sclera, iris, side));
     }
