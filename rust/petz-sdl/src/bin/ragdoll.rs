@@ -1133,6 +1133,13 @@ fn main() -> Result<(), String> {
                 // Screen y grows downwards; the lid covers above the line.
                 uy < -(line + ux * tilt.tan())
             };
+            // The shell's own outline, drawn whether or not the sphere behind
+            // it survived. An eye with no rim reads as a hole; with the rim it
+            // reads as an eye, open or closed. Nothing is painted inside the
+            // open half, so whatever is behind - the sphere, or the head -
+            // shows through.
+            fill_disc(&mut surface, &table, ix, iy,
+                (((re as i32 * 2) + 4) as usize).min(255), OUTLINE);
             let lid_pattern = pattern_for(BODY);
             shade_disc_pattern_masked(&mut surface, &table, ix, iy,
                 (re as i32 * 2) as usize, light, &lid_pattern, &lid_clip);
