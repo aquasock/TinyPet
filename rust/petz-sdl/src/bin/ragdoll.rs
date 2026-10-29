@@ -230,6 +230,10 @@ fn build() -> (Ragdoll, Creature) {
         }
         r.particles[iris].rim = IRIS_RING;
         r.particles[iris].layer = 1;
+        // The eyes are placed exactly, not settled. Left to the solver they
+        // drifted apart by five pixels and one sat higher than the other.
+        r.particles[sclera].pinned = true;
+        r.particles[iris].pinned = true;
 
         r.link(skull, sclera);
         // The pupil and the lid are children of the eye, not of the skull.
@@ -447,7 +451,9 @@ impl Walker {
                 skull_now.y + (y - skull_rest.y),
             );
             for i in [sclera, iris] {
-                doll.drive_to(i, target, 0.5);
+                // Pinned, so this is exact: the solver cannot pull the two eyes
+                // out of symmetry.
+                doll.drag_to(i, target);
                 if let Some(p) = doll.particles.get_mut(i) {
                     p.side = sign * self.eye_radius * self.eye_angle.sin();
                 }
@@ -1511,6 +1517,40 @@ mod walk_tests {
         let left = faces_viewer(heading, angle, -1.0);
         let right = faces_viewer(heading, angle, 1.0);
         assert!(left && right, "both eyes should face the viewer at 225 degrees");
+    }
+
+    #[test]
+    fn the_two_eyes_are_level_when_the_animal_faces_straight_away() {
+        // Reported from play: at 360 degrees the right eye sits higher than the
+        // left. At exactly 0 both eyes are at the same depth, and the projection
+        // only turns depth into height, so they must be level.
+        let (mut doll, c, rest, mut w) = rig();
+        w.body.heading = 0.0;
+        w.heading_body = 0.0;
+        for f in w.facing.iter_mut() {
+            *f = 0.0;
+        }
+        for _ in 0..120 {
+            w.pose(&mut doll, &c, &rest);
+            doll.step(1.0 / 120.0);
+        }
+        let view = View::new(25.0, GROUND);
+        let ys: Vec<f32> = c
+            .eyes
+            .iter()
+            .map(|&i| {
+                let p = &doll.particles[i];
+                let b = Body { pos: w.body.pos, heading: 0.0 };
+                view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y)).y
+            })
+            .collect();
+        let d = (ys[0] - ys[1]).abs();
+        let info: Vec<(f32, f32, f32)> = c
+            .eyes
+            .iter()
+            .map(|&i| (doll.particles[i].pos.x, doll.particles[i].pos.y, doll.particles[i].side))
+            .collect();
+        assert!(d < 0.6, "eyes differ in height by {d:.2} px: {ys:?} positions {info:?}");
     }
 
     #[test]
