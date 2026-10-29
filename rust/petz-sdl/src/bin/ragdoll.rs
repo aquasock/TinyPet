@@ -190,6 +190,13 @@ fn build() -> (Ragdoll, Creature) {
         let fwd = 276.0 + i as f32 * spacing;
         spine.push(r.add(Particle::new(fwd, GROUND - 68.0, spine_r[i], BODY)));
     }
+    // Lift the neck onto the head's own axis. The skull runs from (386, base-26)
+    // to the muzzle at (408, base-16); continuing that line backwards by one
+    // head length puts the neck at (364, base-16). So the neck leaves the body
+    // at a slight angle and the neck-to-skull run is parallel to skull-to-muzzle,
+    // instead of the spine lying flat and the head hopping up off it.
+    r.particles[spine[3]].pos = Vec2::new(364.0, GROUND - 84.0);
+
     for i in 0..spine.len() - 1 {
         r.link(spine[i], spine[i + 1]);
     }
@@ -1605,10 +1612,14 @@ mod walk_tests {
     fn the_body_stays_up_and_keeps_its_height() {
         let (doll, c, _) = run(2.0);
         let spine_y: Vec<f32> = c.spine.iter().map(|&i| doll.particles[i].pos.y).collect();
+        let last = spine_y.len() - 1;
         for (i, y) in spine_y.iter().enumerate() {
+            // The neck is lifted onto the head's axis, so it sits higher than
+            // the rest of the spine by design.
+            let rest = if i == last { GROUND - 84.0 } else { GROUND - 68.0 };
             assert!(
-                (*y - (GROUND - 68.0)).abs() < 14.0,
-                "spine ball {i} drifted to y={y:.1}"
+                (*y - rest).abs() < 14.0,
+                "spine ball {i} drifted to y={y:.1}, expected about {rest:.0}"
             );
         }
     }
