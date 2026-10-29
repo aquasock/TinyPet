@@ -781,12 +781,19 @@ fn main() -> Result<(), String> {
         // hid *both* eyes when the animal faced the camera, where both should
         // be visible, and showed one even when it faced away.
         let mut hidden: Vec<bool> = vec![false; doll.particles.len()];
+        let eye_h = walker.heading_body;
         for &(sclera, _) in &creature.eye_lids {
-            // A margin, not a strict comparison. Facing the camera the two eyes
-            // straddle the head centre and a strict test hid one of them; in
-            // profile they sit a full eye-width either side, which the margin
-            // still catches.
-            if screen[sclera].depth - screen[creature.skull].depth > 2.5 {
+            // An eye is visible while it is on the viewer's side of the head.
+            // This has to be the horizontal offset only: comparing projected
+            // depth folds in the eye's height above the skull centre, which
+            // biased the test and pulled the far eye out about thirty degrees
+            // early.
+            let (eye, head) = (&doll.particles[sclera], &doll.particles[creature.skull]);
+            let dfwd = eye.pos.x - head.pos.x;
+            let dlat = eye.side - head.side;
+            // World y is "away from the viewer"; positive means behind the head.
+            let away = dfwd * eye_h.cos() - dlat * eye_h.sin();
+            if away >= 0.0 {
                 hidden[sclera] = true;
                 for &(base, over) in &creature.eye_overlays {
                     if base == sclera {
@@ -1081,20 +1088,14 @@ mod walk_tests {
         for f in w.facing.iter_mut() {
             *f = heading;
         }
-        let view = View::new(25.0, GROUND);
-        let screen: Vec<_> = doll
-            .particles
-            .iter()
-            .enumerate()
-            .map(|(i, p)| {
-                let b = Body { pos: w.body.pos, heading };
-                view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y))
-            })
-            .collect();
-        let skull = screen[c.skull].depth;
         c.eye_lids
             .iter()
-            .map(|&(sclera, _)| screen[sclera].depth - skull <= 2.5)
+            .map(|&(sclera, _)| {
+                let (eye, head) = (&doll.particles[sclera], &doll.particles[c.skull]);
+                let dfwd = eye.pos.x - head.pos.x;
+                let dlat = eye.side - head.side;
+                dfwd * heading.cos() - dlat * heading.sin() < 0.0
+            })
             .collect()
     }
 
@@ -1106,6 +1107,32 @@ mod walk_tests {
         assert_eq!(profile.iter().filter(|v| **v).count(), 1, "profile shows one eye: {profile:?}");
         let front = visible_eyes(PI);
         assert_eq!(front.iter().filter(|v| **v).count(), 2, "facing the camera shows both: {front:?}");
+    }
+
+    #[test]
+    fn both_eyes_stay_visible_across_the_front_of_the_turn() {
+        // The complaint was that the far eye vanished too early as the animal
+        // turned. Sweep the heading and measure the window where both eyes are
+        // up: it should be a good wide arc centred on facing the camera, not a
+        // sliver.
+        let mut both = 0;
+        let mut first_both: Option<f32> = None;
+        let mut last_both: Option<f32> = None;
+        for deg in 0..360 {
+            let h = (deg as f32).to_radians();
+            let n = visible_eyes(h).iter().filter(|v| **v).count();
+            if n == 2 {
+                both += 1;
+                first_both.get_or_insert(h.to_degrees());
+                last_both = Some(h.to_degrees());
+            }
+        }
+        assert!(
+            both >= 60,
+            "both eyes are only up for {both} degrees of the turn (from {first_both:?} to {last_both:?})"
+        );
+        let (lo, hi) = (first_both.unwrap(), last_both.unwrap());
+        assert!(lo < 180.0 && hi > 180.0, "the both-eyes arc is not centred on the front: {lo}..{hi}");
     }
 
     #[test]
