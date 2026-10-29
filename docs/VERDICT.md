@@ -1,6 +1,7 @@
 # Verdict: can a modern port reproduce Petz 4 ballz bit-exactly?
 
-**Provisional GO**, on the evidence below. The renderer is table-driven integer
+**GO**, on the evidence below — with one synthesis stage still undecoded.
+This verdict covers the drawing system only; the simulation is out of scope. The renderer is table-driven integer
 code, it is deterministic to the byte, and one ball's silhouette has been
 reproduced exactly — 285 of 285 expected pixels accounted for, zero
 unexplained.
@@ -77,6 +78,20 @@ the difference between "a Petz remake" and "Petz".
 The good news: the actual work is small and boring. A table, an offset formula,
 a centring rule, span fills, and an edge pass. No shaders, no floating point, no
 GPU feature dependence.
+
+## The pipeline, as measured
+
+| stage | mechanism | status |
+|---|---|---|
+| LNZ parse | per-ball `col`/`outCol`/`fuzz`/`texture` from a text file | decoded |
+| synthesis | texture (128x64 8bpp) + ramp -> index patch | **undecoded** |
+| geometry | one `fsin`/`fcos` per ball, then 16-bit fixed point | measured |
+| spans | static per-diameter row-width table | decoded, 285/285 |
+| blit | byte copy of the index patch across spans, integer | measured |
+| present | 8bpp surface -> palette LUT -> nearest-neighbour scale | design choice |
+
+The one gap is synthesis: turning a texture plus a base colour into the index
+patch. Everything it feeds is integer and already measured.
 
 ## Limits — what this does and does not establish
 
