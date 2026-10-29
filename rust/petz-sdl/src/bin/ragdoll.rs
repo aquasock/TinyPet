@@ -45,6 +45,9 @@ const SCLERA: u8 = 245;
 /// outline colour. Teal is the Dalmatian's; any breed colour works.
 const IRIS: u8 = 244;
 const IRIS_RING: u8 = 6;
+
+/// One eye per side, at this lateral offset.
+const EYE_SIDES: [f32; 2] = [-12.0, 12.0];
 /// Ears are a darker shade than the coat, as they are in every breed file.
 const EAR: u8 = 95;
 
@@ -153,22 +156,22 @@ fn build() -> (Ragdoll, Creature) {
     // Eyes. The retail data is two balls per eye: a white sclera and a black
     // pupil whose *outline* is the iris, in a per-breed colour. There is no
     // eyelid ball at all - Petz parameterises the lid instead.
+    //
+    // No ears for now: they sit where they can cover the eye in profile, and
+    // until the eyes are right we cannot tell what is hiding what.
     let mut eyes = Vec::new();
     let mut overlay_pairs: Vec<(usize, usize)> = Vec::new();
     let mut lid_pairs: Vec<(usize, usize)> = Vec::new();
-    for side in [-12.0f32, 12.0f32] {
+    for side in EYE_SIDES {
         let sclera = r.add(Particle::new(394.0, base_y - 34.0, 10.0, SCLERA));
         let iris = r.add(Particle::new(394.0, base_y - 33.0, 6.0, IRIS));
-        for i in [sclera, iris] {
+        let lid = r.add(Particle::new(394.0, base_y - 58.0, 11.0, BODY));
+        for i in [sclera, iris, lid] {
             r.particles[i].side = side;
             r.particles[i].rest_side = side;
         }
         r.particles[iris].rim = IRIS_RING;
         r.particles[iris].layer = 1;
-        // A lid ball, in coat colour, that drops over the eye to blink.
-        let lid = r.add(Particle::new(394.0, base_y - 58.0, 11.0, BODY));
-        r.particles[lid].side = side;
-        r.particles[lid].rest_side = side;
 
         r.link(skull, sclera);
         // The pupil and the lid are children of the eye, not of the skull.
@@ -176,71 +179,15 @@ fn build() -> (Ragdoll, Creature) {
         // they simply fell out of the head.
         r.link(sclera, iris);
         r.link(sclera, lid);
-        eyes.push(sclera);
-        eyes.push(iris);
-        eyes.push(lid);
+
+        eyes.extend([sclera, iris, lid]);
         overlay_pairs.push((sclera, iris));
         overlay_pairs.push((sclera, lid));
         lid_pairs.push((sclera, lid));
-    }
-
-    // Ears removed for now. They sit on top of the skull and were landing
-    // nearer the viewer than the eye in profile, so they get rebuilt once the
-    // eyes are right - not before, or we cannot tell what is covering what.
-
-    // Eyes. The retail data is two balls per eye: a white sclera and a black
-    // pupil whose *outline* is the iris, in a per-breed colour. There is no
-    // eyelid ball at all - Petz parameterises the lid instead.
-    let mut eyes = Vec::new();
-    let mut overlay_pairs: Vec<(usize, usize)> = Vec::new();
-    let mut lid_pairs: Vec<(usize, usize)> = Vec::new();
-    for side in [-12.0f32, 12.0f32] {
-        let sclera = r.add(Particle::new(394.0, base_y - 34.0, 10.0, SCLERA));
-        let iris = r.add(Particle::new(394.0, base_y - 33.0, 6.0, IRIS));
-        for i in [sclera, iris] {
-            r.particles[i].side = side;
-            r.particles[i].rest_side = side;
-        }
-        r.particles[iris].rim = IRIS_RING;
-        r.particles[iris].layer = 1;
-        // A lid ball, in coat colour, that drops over the eye to blink.
-        let lid = r.add(Particle::new(394.0, base_y - 58.0, 11.0, BODY));
-        r.particles[lid].side = side;
-        r.particles[lid].rest_side = side;
-
-        r.link(skull, sclera);
-        eyes.push(sclera);
-        eyes.push(iris);
-        eyes.push(lid);
-        overlay_pairs.push((sclera, iris));
-        overlay_pairs.push((sclera, lid));
-        lid_pairs.push((sclera, lid));
-    }
-
-    // Ears: three balls a side, in a darker shade, as the breed files have
-    // them. The pair of brown balls that used to sit here read as something
-    // else entirely - eyelids, by the look of it.
-    let mut ears = Vec::new();
-    for side in [-1.0f32, 1.0] {
-        // On top of the skull and slightly behind it. They used to sit back at
-        // x=372, level with the eyes, where in profile they were nearer the
-        // viewer than the eye and covered it.
-        let a = r.add(Particle::new(378.0, base_y - 58.0, 9.0, EAR));
-        let b = r.add(Particle::new(370.0, base_y - 68.0, 7.5, EAR));
-        let c = r.add(Particle::new(386.0, base_y - 70.0, 7.0, EAR));
-        for i in [a, b, c] {
-            r.particles[i].side = 10.0 * side;
-            r.particles[i].rest_side = 10.0 * side;
-        }
-        r.link(skull, a);
-        r.link(a, b);
-        r.link(a, c);
-        ears.extend([a, b, c]);
     }
 
     // Legs. The front pair hangs off the ball *behind* the neck - the shoulder -
-    // and the hind pair off the hips. Getting this the wrong way round is what
-    // made the front legs look like they were attached to the head.
+    // and the hind pair off the hips.
     let legs_spec: [(f32, f32, f32); 4] = [
         (332.0, 9.0, 1.0),   // left front
         (332.0, -9.0, 1.0),  // right front
@@ -272,8 +219,6 @@ fn build() -> (Ragdoll, Creature) {
         tail_prev = t;
         tail.push(t);
     }
-
-    // Ears sit either side of the skull.
 
     let mut head = vec![skull, muzzle, nose];
     head.extend(eyes);
@@ -1195,6 +1140,20 @@ mod walk_tests {
         );
         let (lo, hi) = (first_both.unwrap(), last_both.unwrap());
         assert!(lo < 180.0 && hi > 180.0, "the both-eyes arc is not centred on the front: {lo}..{hi}");
+    }
+
+    #[test]
+    fn the_head_has_exactly_two_eyes_and_no_ears() {
+        // A bad edit once duplicated the eye block and left the ears in, so the
+        // dog had four of everything. Count them.
+        let (doll, c, _, _) = rig();
+        let count = |colour: u8| doll.particles.iter().filter(|p| p.colour == colour).count();
+        assert_eq!(count(SCLERA), 2, "sclerae");
+        assert_eq!(count(IRIS), 2, "pupils");
+        assert_eq!(count(EAR), 0, "ears should not exist yet");
+        assert_eq!(c.eye_lids.len(), 2, "one lid per eye");
+        assert_eq!(c.eye_overlays.len(), 4, "pupil and lid per eye");
+        assert_eq!(c.head.len(), 9, "skull, muzzle, nose and six eye balls");
     }
 
     #[test]
