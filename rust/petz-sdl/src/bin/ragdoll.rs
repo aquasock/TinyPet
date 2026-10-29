@@ -365,12 +365,12 @@ impl Walker {
             lag,
             // The placement tuned by eye, expressed on the sphere: 27 degrees
             // round from straight ahead, at radius 31 against a head of 26.
-            eye_angle: 27.0_f32.to_radians(),
-            eye_radius: 25.0,
+            eye_angle: 25.0_f32.to_radians(),
+            eye_radius: 29.0,
             eye_bias: 1.5,
             lid_drop: 0.26,
-            lid_tilt: 0.14,
-            eye_lift: 8.0,
+            lid_tilt: 0.23,
+            eye_lift: 12.0,
             moving: 1.0,
         }
     }
@@ -1548,7 +1548,7 @@ mod walk_tests {
     }
 
     fn visible_eyes(heading: f32) -> Vec<bool> {
-        visible_eyes_at(heading, 25.0)
+        visible_eyes_at(heading, 29.0)
     }
 
     /// Does this eye face the viewer? On the sphere the eye sits at

@@ -143,10 +143,19 @@ The eye is built the way the original builds it: three nested shells, outside in
 That third point is the whole trick, and it is why the original's eyes never
 popped: the sphere's rim clips the pupil, rather than the head clipping the eye.
 
-Placement is by angle round the head (27 degrees) and radius (31) against a
-26-pixel skull, with a depth bias in the eye's favour available on top. The eyes
+Placement is by angle round the head and radius from the skull's centre, with a
+height above that centre, a depth bias in the eye's favour, and a lid. The eyes
 are **pinned** rather than simulated: left to the solver they drifted five
 pixels apart and one sat higher than the other.
+
+The defaults as of this pass, all tuned by eye against the retail game:
+
+  angle 25 degrees   radius 29   lift 12   bias 1.5
+  lid drop 0.26      lid tilt 0.23
+
+The nose is a single black ball at the tip with **no rim** - an outline in the
+body's brown around a black nose reads as a brown ring - and it sits clear of the
+muzzle's own sphere so the containment rule does not swallow it.
 
 The eye is, as far as we can tell, finished. Live controls: `H`/`J` radius,
 `K`/`L` angle, `U`/`I` depth bias, `N`/`M` lid drop, `F`/`G` lid tilt.
