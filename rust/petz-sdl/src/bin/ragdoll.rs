@@ -26,7 +26,7 @@ use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use std::time::Instant;
 
-use petz_core::fur::{dapple, shade_disc_pattern, shade_disc_pattern_masked, stripes, Pattern, Texture};
+use petz_core::fur::{dapple, stripes, Pattern, Texture};
 use petz_core::gait::{two_bone_ik, Gait, GaitSpec};
 use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
 use petz_core::project::{Body, Projected, Vec3 as WVec3, View};
@@ -361,13 +361,6 @@ fn build() -> (Ragdoll, Creature) {
     head.extend(ear_parts.iter().copied());
     head.extend(eyes);
     (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eyes: eye_list, ears: ear_list, eye_parts, head_balls })
-}
-
-/// Which part the eye and ear keys drive.
-#[derive(Clone, Copy, PartialEq)]
-enum Focus {
-    Eyes,
-    Ears,
 }
 
 /// The walking controller: owns the clock, the world position, and the pose.
@@ -758,14 +751,14 @@ fn main() -> Result<(), String> {
     // Projected positions from the last frame; the picker works in screen space.
     let mut screen: Vec<Projected> = Vec::new();
 
-    let mut sweep_t = 0.0f32;
+    let sweep_t = 0.0f32;
     let mut sweep_last = Instant::now();
     let mut frame_no = 0u32;
     let mut held: std::collections::HashSet<Keycode> = std::collections::HashSet::new();
     let mut depth = DepthBuffer::new(W, H);
     // Ball numbers, for referring to them. Tab toggles.
     let mut show_ids = true;
-    let mut focus = Focus::Eyes;
+
     let mut events = sdl.event_pump()?;
     let mut paused = false;
     let step = 1.0 / 120.0;
@@ -775,8 +768,7 @@ fn main() -> Result<(), String> {
     println!(
         "drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
          light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
-         eyes/ears: H/J radius, K/L angle, PgUp/PgDn, U/I (B switches which)\n\
-         eyes only: N/M lid, F/G tilt   Tab: ball numbers\n\
+         ears: H/J radius, K/L angle, PgUp/PgDn sink, U/I bias   Tab: ball numbers\n\
          P: settings   R: reset   Space: pause   Esc: quit"
     );
     report(light, steps, tex_idx, textures[tex_idx].0);
@@ -861,15 +853,6 @@ fn main() -> Result<(), String> {
                         tex_idx = (tex_idx + 1) % textures.len();
                         report(light, steps, tex_idx, textures[tex_idx].0);
                     }
-                    sdl2::keyboard::Keycode::B => {
-                        focus = if focus == Focus::Eyes { Focus::Ears } else { Focus::Eyes };
-                        println!(
-                            "tuning {}",
-                            if focus == Focus::Eyes { "the eyes" } else { "the ears" }
-                        );
-                        report_eyes(&walker);
-                        report_ears(&walker);
-                    }
                     sdl2::keyboard::Keycode::Tab => {
                         show_ids = !show_ids;
                         println!("ball numbers {}", if show_ids { "on" } else { "off" });
@@ -880,91 +863,35 @@ fn main() -> Result<(), String> {
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::K => {
-                        if focus == Focus::Eyes {
-                            walker.eye_angle = (walker.eye_angle - 2.0_f32.to_radians()).max(0.0);
-                        } else {
-                            walker.ear_angle = (walker.ear_angle - 2.0_f32.to_radians()).max(-1.2);
-                        }
-                        report_eyes(&walker);
+                        walker.ear_angle = (walker.ear_angle - 2.0_f32.to_radians()).max(-1.2);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::L => {
-                        if focus == Focus::Eyes {
-                            walker.eye_angle = (walker.eye_angle + 2.0_f32.to_radians()).min(1.4);
-                        } else {
-                            walker.ear_angle = (walker.ear_angle + 2.0_f32.to_radians()).min(1.2);
-                        }
-                        report_eyes(&walker);
+                        walker.ear_angle = (walker.ear_angle + 2.0_f32.to_radians()).min(1.2);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::H => {
-                        if focus == Focus::Eyes {
-                            walker.eye_radius = (walker.eye_radius - 1.0).max(10.0);
-                        } else {
-                            walker.ear_radius = (walker.ear_radius - 1.0).max(10.0);
-                        }
-                        report_eyes(&walker);
+                        walker.ear_radius = (walker.ear_radius - 1.0).max(10.0);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::J => {
-                        if focus == Focus::Eyes {
-                            walker.eye_radius = (walker.eye_radius + 1.0).min(60.0);
-                        } else {
-                            walker.ear_radius = (walker.ear_radius + 1.0).min(70.0);
-                        }
-                        report_eyes(&walker);
+                        walker.ear_radius = (walker.ear_radius + 1.0).min(70.0);
                         report_ears(&walker);
                     }
-                    sdl2::keyboard::Keycode::N => {
-                        walker.lid_drop = (walker.lid_drop - 0.05).max(0.0);
-                        report_eyes(&walker);
-                    }
-                    sdl2::keyboard::Keycode::M => {
-                        walker.lid_drop = (walker.lid_drop + 0.05).min(1.0);
-                        report_eyes(&walker);
-                    }
-                    sdl2::keyboard::Keycode::F => {
-                        walker.lid_tilt = (walker.lid_tilt - 0.03).max(-0.6);
-                        report_eyes(&walker);
-                    }
-                    sdl2::keyboard::Keycode::G => {
-                        walker.lid_tilt = (walker.lid_tilt + 0.03).min(0.6);
-                        report_eyes(&walker);
-                    }
                     sdl2::keyboard::Keycode::PageUp => {
-                        if focus == Focus::Eyes {
-                            walker.eye_lift = (walker.eye_lift + 1.0).min(24.0);
-                        } else {
-                            walker.ear_sink = (walker.ear_sink + 0.05).min(0.9);
-                        }
-                        report_eyes(&walker);
+                        walker.ear_sink = (walker.ear_sink + 0.05).min(0.9);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::PageDown => {
-                        if focus == Focus::Eyes {
-                            walker.eye_lift = (walker.eye_lift - 1.0).max(-8.0);
-                        } else {
-                            walker.ear_sink = (walker.ear_sink - 0.05).max(0.0);
-                        }
-                        report_eyes(&walker);
+                        walker.ear_sink = (walker.ear_sink - 0.05).max(0.0);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::U => {
-                        if focus == Focus::Eyes {
-                            walker.eye_bias = (walker.eye_bias - 0.5).max(0.0);
-                        } else {
-                            walker.ear_bias = (walker.ear_bias + 0.5).min(20.0);
-                        }
-                        report_eyes(&walker);
+                        walker.ear_bias = (walker.ear_bias + 0.5).min(20.0);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::I => {
-                        if focus == Focus::Eyes {
-                            walker.eye_bias = (walker.eye_bias + 0.5).min(12.0);
-                        } else {
-                            walker.ear_bias = (walker.ear_bias - 0.5).max(-40.0);
-                        }
-                        report_eyes(&walker);
+                        walker.ear_bias = (walker.ear_bias - 0.5).max(-40.0);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::Z => {
