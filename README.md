@@ -11,8 +11,14 @@ Nothing here redistributes game code or art. You supply your own discs.
 
 ## Status
 
-Milestone **M0 complete**. Verdict: **provisional GO** — see
+Milestone **M0 complete** — the oracle. Verdict: **provisional GO** — see
 [docs/VERDICT.md](docs/VERDICT.md).
+
+Since then the project has moved on: there is a working sandbox that walks a
+sphere-spring creature around a 2.5D scene. The goal has also been relaxed from
+bit-exact to "looks and acts like", so the oracle is now reference rather than
+target. Where that stands, what is verified and what is known wrong is in
+[docs/SANDBOX.md](docs/SANDBOX.md).
 
 What is established, with evidence:
 
