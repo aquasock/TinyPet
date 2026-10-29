@@ -173,14 +173,19 @@ fn main() -> Result<(), String> {
             }
         }
         if frame_idx % 60 == 0 { eprintln!("balls this frame: {}", anim.frames[frame_idx].len()); }
-        for ball in &anim.frames[frame_idx] {
+        // Outlines are filled discs slightly larger than the body, so they must
+        // be laid down first for the body to punch out the middle and leave a
+        // rim. Draw order in the captured stream is not reliable for this.
+        let frame = &anim.frames[frame_idx];
+        for ball in frame.iter().filter(|b| b.kind == 3) {
+            if ball.w == 0 || ball.w > table.max_diameter() { continue; }
+            fill_disc(&mut surface, &table, ball.cx, ball.cy, ball.w, ball.colour);
+        }
+        for ball in frame.iter().filter(|b| b.kind != 3) {
             if ball.w == 0 || ball.w > table.max_diameter() {
                 continue;
             }
-            if ball.kind == 3 {
-                // Outline: rect is 4px larger than the body's, so the rim is 2px.
-                petz_core::fill_ring(&mut surface, &table, ball.cx, ball.cy, ball.w, 2, ball.colour);
-            } else if ball.kind == 0 {
+            if ball.kind == 0 {
                 // Iris: drawn last over the pupil, so it must be a ring or the
                 // pupil disappears. Hole sized from the pupil record (w-8).
                 petz_core::fill_ring(&mut surface, &table, ball.cx, ball.cy, ball.w, 4, ball.colour);

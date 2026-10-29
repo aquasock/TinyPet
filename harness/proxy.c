@@ -22,6 +22,7 @@
  */
 #include <windows.h>
 #include <string.h>
+#include <stdlib.h>
 
 typedef const char *(__cdecl *pNameFn)(int);
 static void *find_export(const char *want);
@@ -512,6 +513,7 @@ void *g_fill2_tramp = NULL, *g_fill3_tramp = NULL;
 void *g_fill4_tramp = NULL, *g_fill5_tramp = NULL;
 void *g_disp_tramp = NULL;
 static int g_disp_dumps = 0;
+static LONG g_marker_slot = -1;
 
 void disp_probe(void *sprite, void *ballstates)
 {
@@ -528,8 +530,21 @@ void disp_probe(void *sprite, void *ballstates)
             memcpy(rec + 64, &marker, 4);
             DWORD sp = (DWORD)(ULONG_PTR)sprite;
             memcpy(rec + 68, &sp, 4);            /* which XBallz (which pet) */
+            g_marker_slot = slot;
         }
     }
+    if (!g_fd_parsed) {
+        char v[16];
+        g_fd_every = GetEnvironmentVariableA("PETZ_FRAMEDUMP", v, sizeof(v)) > 0
+                     ? (int)atoi(v) : 0;
+        g_fd_parsed = 1;
+    }
+    if (g_fd_every > 0) {
+        LONG slot2 = InterlockedIncrement(&g_fd_calls) - 1;
+        if (slot2 % g_fd_every == 0 && g_marker_slot >= 0)
+            dump_pair(g_marker_slot, sprite);
+    }
+
     if (!ballstates || g_disp_dumps >= 3) return;
     char name[48], *q = name;
     lstrcpyA(q, "ballstate-"); q += lstrlenA(q);
@@ -548,6 +563,65 @@ void disp_probe(void *sprite, void *ballstates)
     lstrcpynA(p, name, 30);
     slog(buf);
 }
+
+/* ---- paired capture: pixels + the blocks that produced them -------------
+ * The decisive experiment for pass semantics. At a frame marker we dump the
+ * scene surface and record which ring slot that marker occupies. Offline we
+ * take dump i, apply every recorded block between marker i and marker i+1,
+ * and diff that against dump i+1. No alignment guesswork: a mismatch points
+ * at the exact pass we mis-modelled.
+ */
+static int g_fd_every = 0, g_fd_parsed = 0;
+static long g_fd_calls = 0, g_fd_idx = 0;
+
+static void dump_pair(LONG slot, void *sprite)
+{
+    int sw = GetSystemMetrics(SM_CXSCREEN);
+    int sh = GetSystemMetrics(SM_CYSCREEN);
+    Surface *best = NULL;
+    for (int i = 0; i < g_surf_count; i++) {
+        Surface *s = &g_surf[i];
+        if (!s->bits || s->bpp != 8) continue;
+        if (s->width == sw && s->height == sh) { best = s; break; }
+        if (!best || (long)s->width * s->height > (long)best->width * best->height)
+            best = s;
+    }
+    if (!best) return;
+
+    char name[80], *q = name;
+    lstrcpyA(q, "pf-"); q += 3;
+    q = put_uint(q, (unsigned long)g_fd_idx);
+    *q++ = '.';
+    lstrcpyA(q, "raw"); q += 3;
+    *q = 0;
+
+    HANDLE f = CreateFileA(name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) return;
+    DWORD n, hdr[6] = { (DWORD)best->width, (DWORD)best->height, (DWORD)best->bpp,
+                        (DWORD)best->stride, (DWORD)g_fd_idx, (DWORD)best->has_pal };
+    WriteFile(f, hdr, sizeof(hdr), &n, NULL);
+    if (best->has_pal) WriteFile(f, best->pal, 256 * 4, &n, NULL);
+    DWORD want = (DWORD)(best->stride * best->height);
+    BOOL ok = WriteFile(f, best->bits, want, &n, NULL);
+    CloseHandle(f);
+    if (!ok || n != want) return;
+
+    HANDLE ix = CreateFileA("pf-index.txt", FILE_APPEND_DATA, 0, NULL, OPEN_ALWAYS,
+                            FILE_ATTRIBUTE_NORMAL, NULL);
+    if (ix == INVALID_HANDLE_VALUE) return;
+    char line[96], *p = line;
+    p = put_uint(p, (unsigned long)g_fd_idx); *p++ = ' ';
+    p = put_uint(p, (unsigned long)slot);     *p++ = ' ';
+    p = put_uint(p, (unsigned long)(ULONG_PTR)sprite); *p++ = ' ';
+    p = put_uint(p, (unsigned long)best->width); *p++ = 'x';
+    p = put_uint(p, (unsigned long)best->height);
+    *p++ = '\n';
+    WriteFile(ix, line, (DWORD)(p - line), &n, NULL);
+    CloseHandle(ix);
+    g_fd_idx++;
+}
+
 extern void frame_post_entry(void);
 void *g_frame_tramp = NULL, *g_frame_ret = NULL;
 void *g_frame_post = (void *)frame_post_entry;
