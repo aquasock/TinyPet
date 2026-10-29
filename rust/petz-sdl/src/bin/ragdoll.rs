@@ -288,11 +288,15 @@ struct Walker {
     /// the whole skeleton to a new orientation.
     facing: Vec<f32>,
     lag: Vec<f32>,
-    /// How far forward and how far to the side the eyes sit. Live-tunable
-    /// because where the eye stops clearing the skull is a judgement call, not
-    /// something that can be derived from first principles.
-    eye_fwd: f32,
-    eye_out: f32,
+    /// Where the eyes sit on the head: an angle round the skull from straight
+    /// ahead, and a radius from the skull's centre.
+    ///
+    /// Parameterising by angle rather than by a lateral offset matters. Two
+    /// parallel lines pushed sideways eventually pass *through* the head; a
+    /// point at a fixed radius stays on its surface, so the eye is always
+    /// tangent to the head and can never sink into it.
+    eye_angle: f32,
+    eye_radius: f32,
     /// Last movement input, so the pose knows whether to animate a gait.
     moving: f32,
 }
@@ -333,8 +337,10 @@ impl Walker {
             heading_body: body.heading,
             facing: vec![body.heading; particles],
             lag,
-            eye_fwd: 414.0,
-            eye_out: 14.0,
+            // The placement tuned by eye, expressed on the sphere: 27 degrees
+            // round from straight ahead, at radius 31 against a head of 26.
+            eye_angle: 27.0_f32.to_radians(),
+            eye_radius: 31.0,
             moving: 1.0,
         }
     }
@@ -412,11 +418,19 @@ impl Walker {
         for (i, &p) in creature.head.iter().enumerate() {
             doll.drive_to(p, Vec2::new(rest.head[i].x, rest.head[i].y + lift), 0.4);
         }
+        let skull_now = doll.particles[creature.skull].pos;
+        let skull_rest = rest.head[0];
         for &(sclera, iris, y, sign) in &creature.eye_parts {
+            // On the head's surface at the chosen angle, so widening the eyes
+            // walks them round the skull instead of through it.
+            let target = Vec2::new(
+                skull_now.x + self.eye_radius * self.eye_angle.cos(),
+                skull_now.y + (y - skull_rest.y),
+            );
             for i in [sclera, iris] {
-                doll.drive_to(i, Vec2::new(self.eye_fwd, y + lift), 0.5);
+                doll.drive_to(i, target, 0.5);
                 if let Some(p) = doll.particles.get_mut(i) {
-                    p.side = sign * self.eye_out;
+                    p.side = sign * self.eye_radius * self.eye_angle.sin();
                 }
             }
             // Let the link follow the eye. Keeping the length it was built at
@@ -491,6 +505,14 @@ fn elevate_light(dir: Vec3, degrees: f32) -> Vec3 {
     let yaw = dir.x.atan2(dir.z).to_degrees();
     let pitch = (dir.y.asin().to_degrees() + degrees).clamp(-80.0, 80.0);
     Vec3::from_angles(yaw, pitch)
+}
+
+fn report_eyes(w: &Walker) {
+    println!(
+        "eyes: angle {:.0} deg  radius {:.1}",
+        w.eye_angle.to_degrees(),
+        w.eye_radius
+    );
 }
 
 fn report(light: Light, steps: usize, tex: usize, texture: &str) {
@@ -654,23 +676,23 @@ fn main() -> Result<(), String> {
                     }
                     sdl2::keyboard::Keycode::P => {
                         report(light, steps, tex_idx, textures[tex_idx].0);
-                        println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
+                        report_eyes(&walker);
                     }
                     sdl2::keyboard::Keycode::K => {
-                        walker.eye_out = (walker.eye_out - 0.5).max(0.0);
-                        println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
+                        walker.eye_angle = (walker.eye_angle - 2.0_f32.to_radians()).max(0.0);
+                        report_eyes(&walker);
                     }
                     sdl2::keyboard::Keycode::L => {
-                        walker.eye_out = (walker.eye_out + 0.5).min(34.0);
-                        println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
+                        walker.eye_angle = (walker.eye_angle + 2.0_f32.to_radians()).min(1.4);
+                        report_eyes(&walker);
                     }
                     sdl2::keyboard::Keycode::H => {
-                        walker.eye_fwd = (walker.eye_fwd - 1.0).max(360.0);
-                        println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
+                        walker.eye_radius = (walker.eye_radius - 1.0).max(10.0);
+                        report_eyes(&walker);
                     }
                     sdl2::keyboard::Keycode::J => {
-                        walker.eye_fwd = (walker.eye_fwd + 1.0).min(440.0);
-                        println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
+                        walker.eye_radius = (walker.eye_radius + 1.0).min(60.0);
+                        report_eyes(&walker);
                     }
                     sdl2::keyboard::Keycode::Z => {
                         light.ambient = (light.ambient - 0.05).max(0.0);
@@ -1230,10 +1252,15 @@ mod walk_tests {
     /// eye's centre: is the eye's surface nearer than the head's surface at
     /// that point?
     fn visible_eyes(heading: f32) -> Vec<bool> {
+        visible_eyes_at(heading, 31.0)
+    }
+
+    fn visible_eyes_at(heading: f32, radius: f32) -> Vec<bool> {
         // Settle first: the eye's runtime position comes from the tunables via
         // pose(), not from where it was built.
         let (mut doll, c, rest, mut w) = rig();
-                w.body.heading = heading;
+        w.eye_radius = radius;
+        w.body.heading = heading;
         w.heading_body = heading;
         for f in w.facing.iter_mut() {
             *f = heading;
@@ -1323,6 +1350,32 @@ mod walk_tests {
         assert_eq!(c.eyes.len(), 2, "two eyes");
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
         assert_eq!(c.head.len(), 7, "skull, muzzle, nose and four eye balls");
+    }
+
+    /// Does this eye face the viewer? On the sphere the eye sits at
+    /// radius * (cos angle forward, sin angle sideways), so the facing test
+    /// reduces to radius * cos(angle +/- heading) - the radius cancels out of
+    /// the sign and cannot flip an eye on its own.
+    fn faces_viewer(heading: f32, angle: f32, sign: f32) -> bool {
+        let (cx, sx) = (heading.cos(), heading.sin());
+        let (ca, sa) = (angle.cos(), angle.sin());
+        let forward = ca;
+        let lateral = sign * sa;
+        let away = forward * cx - lateral * sx;
+        away < 0.0
+    }
+
+    #[test]
+    fn the_radius_cannot_flip_which_way_an_eye_faces() {
+        // Reported from play: at 225 degrees, tapping the radius keys made the
+        // left eye vanish. The facing rule must not depend on the radius; the
+        // occlusion rule legitimately does, because a smaller radius buries the
+        // eye in the head.
+        let heading = 225.0_f32.to_radians();
+        let angle = 27.0_f32.to_radians();
+        let left = faces_viewer(heading, angle, -1.0);
+        let right = faces_viewer(heading, angle, 1.0);
+        assert!(left && right, "both eyes should face the viewer at 225 degrees");
     }
 
     #[test]
