@@ -838,8 +838,25 @@ fn main() -> Result<(), String> {
             }
         }
 
+        // An eye sits on the *surface* of the head, but sorting by ball centre
+        // compares the eye's centre with the skull's centre - and the skull is
+        // twenty-six pixels in radius, so its centre passes in front of the eye
+        // long before the eye is actually behind the head. That is what made it
+        // vanish early. Give the eye the skull's depth so it always draws just
+        // after the head it is attached to; anything genuinely nearer, like the
+        // muzzle, still covers it.
+        let mut sort_depth: Vec<f32> = screen.iter().map(|p| p.depth).collect();
+        for &sclera in &creature.eyes {
+            for &(base, over) in &creature.eye_overlays {
+                if base == sclera {
+                    sort_depth[over] = screen[creature.skull].depth - 0.5;
+                }
+            }
+            sort_depth[sclera] = screen[creature.skull].depth - 0.5;
+        }
+
         let mut order: Vec<usize> = (0..doll.particles.len()).collect();
-        order.sort_by(|&a, &b| screen[b].depth.partial_cmp(&screen[a].depth).unwrap());
+        order.sort_by(|&a, &b| sort_depth[b].partial_cmp(&sort_depth[a]).unwrap());
 
         // Rims for the body only. An iris rim drawn here would be painted over
         // by its own sclera, so it is drawn with the pair instead.
