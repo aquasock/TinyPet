@@ -61,6 +61,9 @@ tools/
   analyze-ball.py       decode a captured ball (input block + pixels)
   capture.sh            capture the game window to PNG
   framehash.py          hash / crop / diff captured frames
+rust/                   the reimplementation
+  petz-core/            surface, palette, span rasterizer, LNZ parser (no deps)
+  petz-headless/        render without a display, for the oracle
 analysis/
   pe_exports.py         dump named exports (rva, ordinal, symbol)
   pe_resources.py       list or extract PE resources (BMP/FLM/BDT/...)
@@ -73,6 +76,18 @@ docs/
 build/                  everything generated (gitignored)
   tools/  iso/  install/  wineprefix/  frames/  snapshots/
 ```
+
+## The Rust side
+
+```sh
+cd rust
+cargo test          # includes the 285/285 ball-silhouette check
+cargo run -p petz-headless -- ball
+```
+
+`petz-core` has no dependencies by design. Its first test reproduces a captured
+ball's silhouette pixel-for-pixel from the committed evidence, so the renderer
+is proven before it grows.
 
 ## Running it
 

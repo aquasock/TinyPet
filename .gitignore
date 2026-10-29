@@ -13,3 +13,6 @@ harness/*.dll
 
 # Agent session state
 .codewhale/
+
+# Rust build output
+rust/target/

@@ -1,0 +1,9 @@
+[package]
+name = "petz-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Deliberately none. The renderer is integer arithmetic over byte buffers; it
+# should not need a dependency tree to be reproducible.
