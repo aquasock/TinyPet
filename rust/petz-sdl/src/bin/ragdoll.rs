@@ -238,8 +238,11 @@ fn build() -> (Ragdoll, Creature) {
     // gait because the base hangs off the skull.
     let mut ear_parts: Vec<usize> = Vec::new();
     for side in [-1.0f32, 1.0] {
-        let base = r.add(Particle::new(378.0, base_y - 50.0, 9.0, EAR));
-        let tip = r.add(Particle::new(371.0, base_y - 64.0, 7.0, EAR_TIP));
+        // On top of the skull rather than behind it, and reaching upwards. The
+        // tips are driven, not left to gravity: a free tip hangs, which is what
+        // made the ears droop instead of stand.
+        let base = r.add(Particle::new(378.0, base_y - 54.0, 9.0, EAR));
+        let tip = r.add(Particle::new(374.0, base_y - 72.0, 6.0, EAR_TIP));
         for i in [base, tip] {
             r.particles[i].side = 10.0 * side;
             r.particles[i].rest_side = 10.0 * side;
@@ -338,6 +341,7 @@ fn build() -> (Ragdoll, Creature) {
     }
 
     let mut head = vec![skull, muzzle, nose];
+    head.extend(ear_parts.iter().copied());
     head.extend(eyes);
     (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eyes: eye_list, eye_parts, head_balls })
 }
@@ -1583,7 +1587,7 @@ mod walk_tests {
         assert_eq!(count(EAR_TIP), 2, "ear tips");
         assert_eq!(c.eyes.len(), 2, "two eyes");
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
-        assert_eq!(c.head.len(), 7, "skull, muzzle, nose and four eye balls");
+        assert_eq!(c.head.len(), 11, "skull, muzzle, nose, four ear and four eye balls");
         assert_eq!(doll.particles.len(), 31, "total ball count");
     }
 
