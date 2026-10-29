@@ -497,6 +497,55 @@ This is the sharpest statement of the reproduction problem available so far:
 the silhouette is table-driven, and the remaining difference is a small integer
 effect in a specific row range rather than any analytic shape question.
 
+### The LNZ file is the whole colour and shape spec
+
+**[verified]** Breed `.cat`/`.dog` files carry two `LNZ` resources, and they are
+**plain text** with commented column headers. `B+W Shorthair.cat` -> `BW.LNZ`
+(15,139 bytes, 28 sections). This is the system the community has been editing
+for 25 years, and it is the authoritative description of how a pet is drawn.
+
+Geometry sections: `[Head Enlargement]`, `[Face Extension]`, `[Body Extension]`,
+`[Leg Extension]`, `[Feet Enlargement]`, `[Ear Extension]`, `[Project Ball]`,
+`[Ball Size Override]`, `[Default Scales]` (pet scale 87, ball scale 96).
+
+Colour and surface, with the file's own help text:
+
+```
+[Ballz Info]        ;col outCol spklCl fuzz otlntTyp sizeDif group texture
+  35, 244, 244, 1, -1, 3, 4, 1    eBall_ankleL,
+  35,  25, 244, 0, -2, 5, 5, 1    eBall_elbowL,
+
+[Paint Ballz]       ;base ball diameter(% of baseball) direction colour
+                    ;outlinecolor fuzz outline group texture
+  16, 50, 0,1,.3, 47, -1, 0, -1, -1, -1
+
+[Texture List]      ;FUZZ -1 = no outline, 0 = half outline, >0 = thickness
+  \art\textures\Plush.bmp    1
+  \art\textures\hair10.bmp   1
+
+[Fur Color Areas]   ;FurColorTrait  ballWithBaseColor  colorAreas
+[Color Info Override]  ;individual variation, per ball
+[Outline Color Override]
+[Fur Markings]      ;groupType 0=Normal 1=BodyArea 2=Primary 3=Paw
+```
+
+**[verified]** The texture paths resolve to `BMP` resources inside
+`Petz 4 Rez.dll`, not to loose files: `PLUSH.BMP` (128x64), `HAIR10.BMP`
+(128x64), `HAIR6.BMP`, all 8bpp. `Catz 4 Rez.dll` separately carries fur
+pattern textures (`CALI2`, `MOTTLED2`, `MOTTED5`, `HAIR4`, `CATZCORNER`).
+
+**[inferred]** So a ball's colour is a **single palette index** from the LNZ,
+and the per-pixel variation (~19 indices clustered around a base) comes from
+sampling a texture as a shade/height map and offsetting that index. That fits the
+observed data exactly: a ball with base colour N renders as a narrow band of
+indices around N with texture-driven variation, and the texture's own 0-255
+indices never appear on screen.
+
+**Consequence for the port:** the ballz system is a *data interpreter*, not a
+renderer with hardcoded shading. Shape comes from tables and LNZ overrides;
+colour comes from an index plus a texture-driven offset. That is the most
+portable possible answer - the engine is small and the content is data.
+
 ### Ball data and fur art
 
 **[verified]** `Catz 4 Rez.dll` holds **493 `BDT` entries** totalling 11.2 MB
