@@ -1,0 +1,15 @@
+# Retail media — never commit. Supply your own discs.
+source/*.iso
+
+# All generated state: extraction, wine prefix, captures, golden corpus.
+build/
+
+# Python
+__pycache__/
+*.pyc
+
+# Compiled shim: build it with tools/build-shim.sh
+harness/*.dll
+
+# Agent session state
+.codewhale/

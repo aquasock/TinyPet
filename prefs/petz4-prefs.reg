@@ -1,0 +1,26 @@
+REGEDIT4
+
+; Petz 4 preferences that suppress first-run warning dialogs.
+;
+; Schema (verified in Petz 4.exe, CShlGlobals::LoadGlobals at 0x4553xx..0x4554xx):
+;   key    HKEY_CURRENT_USER\Software\PF.Magic\Petz 4
+;   name   the literal strings in .rdata at 0x61e3fc.. (see docs/BINARY_NOTES.md)
+;   type   REG_BINARY, 1 byte  (the reader passes a 1-byte buffer and NULL lpType)
+;   value  00 = do not warn
+;
+; Import with: wine regedit /S this-file.reg   (see tools/seed-prefs.sh)
+
+[HKEY_CURRENT_USER\Software\PF.Magic\Petz 4]
+"Warn About No Voice Rec"=hex:00
+"Warn About No Family Model"=hex:00
+"Warn About No Breed"=hex:00
+"Warn About Workspace"=hex:00
+"Warn About Performance"=hex:00
+"Warn About Making Pet"=hex:00
+"Warn About 8Bit Sound"=hex:00
+"Warn About Bad ACM"=hex:00
+"Warn About No ACM"=hex:00
+"Warn About Sound Init"=hex:00
+"Warn About Monitor"=hex:00
+"Warn Used Nametag"=hex:00
+"Confirm Web Launch"=hex:00

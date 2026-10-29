@@ -1,0 +1,3 @@
+LIBRARY UVocab
+EXPORTS
+VtGeneratePronunciations=UVocab_real.VtGeneratePronunciations
