@@ -1033,6 +1033,25 @@ fn main() -> Result<(), String> {
             .chain(creature.eye_overlays.iter().map(|(_, o)| *o))
             .collect();
 
+        // The ears take the head's depth, one unit in front of its centre. That
+        // single position does both jobs: it is in front of the skull's rim,
+        // which is drawn half a unit behind its centre, so the head's outline no
+        // longer runs across the ears; and it is behind the skull's own surface,
+        // which is a full radius in front, so the skull still covers the ear
+        // where they overlap and the ear's outline does not show against the
+        // head. Exactly how two body segments meet.
+        //
+        // The eyes are exempt: their outline is supposed to sit on the head.
+        {
+            let sk_depth = screen[creature.skull].depth;
+            for &ear in &creature.ears {
+                let d = screen[ear].depth;
+                if let Some(p) = doll.particles.get_mut(ear) {
+                    p.z_bias = (sk_depth - 1.0) - d;
+                }
+            }
+        }
+
         // ---- ordinary balls --------------------------------------------------
         for i in 0..doll.particles.len() {
             if eye_set.contains(&i) {
