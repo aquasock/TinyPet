@@ -54,6 +54,9 @@ const IRIS_RING: u8 = 6;
 const EYE_SIDES: [f32; 2] = [-12.0, 12.0];
 /// Ears are a darker shade than the coat, as they are in every breed file.
 const EAR: u8 = 95;
+/// The eyelid shell. A shade darker than the coat, so the lid reads as a lid
+/// rather than as more of the face.
+const LID: u8 = 69;
 /// A lighter shade for the tip, so the ear is two-tone and reads as an ear
 /// rather than a lump. The breed files do the same thing with an inner-ear
 /// colour.
@@ -1117,7 +1120,7 @@ fn main() -> Result<(), String> {
             };
             draw_ring(&mut surface, &mut depth, &table, ix, iy,
                 ((outer as i32 * 2) as usize).min(255), 2, de, -2.0, OUTLINE, &lid_keep);
-            let lpat = pattern_for(BODY);
+            let lpat = pattern_for(LID);
             draw_disc(&mut surface, &mut depth, &table, ix, iy,
                 ((outer as i32 * 2) as usize).min(255), de, -2.1,
                 Paint::Shaded { light, pattern: &lpat }, &lid_keep);
