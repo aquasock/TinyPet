@@ -976,9 +976,21 @@ fn main() -> Result<(), String> {
         }
 
         // ---- eyes: three shells ---------------------------------------------
-        for &(sclera, iris, _y, _sign) in &creature.eye_parts {
+        // Both eyes sort after the head, but they must still be ordered between
+        // themselves: sharing one sort key let the far eye be painted over the
+        // near one, which is what "the right eye is underneath the left" was.
+        let mut eyes_sorted = creature.eye_parts.clone();
+        eyes_sorted.sort_by(|a, b| {
+            screen[b.0].depth.partial_cmp(&screen[a.0].depth).unwrap()
+        });
+        for &(sclera, iris, _y, _sign) in &eyes_sorted {
             let sp = &doll.particles[sclera];
             let cp = &doll.particles[creature.skull];
+            // Use this eye's own facing, not the body's. The head lags the body
+            // in a turn, and mixing the two made the pupil slide against a head
+            // that had not caught up yet.
+            let eh = walker.facing.get(sclera).copied().unwrap_or(heading);
+            let fe = Body { pos: walker.body.pos, heading: eh }.forward();
 
             // Does the white sphere face the viewer? Its normal is the offset
             // from the head's centre, in world space.
@@ -987,7 +999,7 @@ fn main() -> Result<(), String> {
                 sp.side - cp.side,
                 cp.pos.y - sp.pos.y,
             );
-            let n_y = dx * heading.cos() - dl * heading.sin();
+            let n_y = dx * eh.cos() - dl * eh.sin();
             if to_cam(0.0, n_y, du) <= 0.0 {
                 continue; // eye is round the back of the head
             }
@@ -1032,7 +1044,7 @@ fn main() -> Result<(), String> {
             // The slide is the projected sideways component of the animal's
             // facing: centred when it looks at you, at the rim in profile, and
             // clipped by the sphere's own edge because it is a disc not a plane.
-            let off = re * f.x;
+            let off = re * fe.x;
             let px = (cx + off).round() as i32;
             let ip = &doll.particles[iris];
             let ri = ip.radius.max(1.0);
