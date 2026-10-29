@@ -545,8 +545,14 @@ impl Walker {
         {
             let sk = doll.particles[creature.skull].pos;
             for &(base, tip, sign) in &creature.ears {
-                let bx = sk.x + self.ear_radius * self.ear_angle.sin();
-                let by = sk.y - self.ear_radius * self.ear_angle.cos();
+                // On the head's sphere, not on a horizontal plane. The width is
+                // an angle round the skull, so widening an ear walks it round
+                // the surface - exactly as the eyes are placed - instead of
+                // sliding it sideways off it.
+                let beta = (self.ear_width / self.ear_radius.max(1.0)).clamp(-1.0, 1.0).asin();
+                let c = beta.cos();
+                let bx = sk.x + self.ear_radius * self.ear_angle.sin() * c;
+                let by = sk.y - self.ear_radius * self.ear_angle.cos() * c;
                 doll.drag_to(base, Vec2::new(bx, by));
                 // The tip leans back and up from the base, then sinks into it.
                 let (mut tx, mut ty) = (bx - 4.0, by - 18.0);
@@ -1665,6 +1671,26 @@ mod walk_tests {
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
         assert_eq!(c.head.len(), 11, "skull, muzzle, nose, four ear and four eye balls");
         assert_eq!(doll.particles.len(), 31, "total ball count");
+    }
+
+    #[test]
+    fn the_ears_sit_on_the_head_sphere() {
+        let (mut doll, c, rest, mut w) = rig();
+        for _ in 0..120 {
+            w.pose(&mut doll, &c, &rest);
+            doll.step(1.0 / 120.0);
+        }
+        let sk = &doll.particles[c.skull];
+        for &(base, _tip, _) in &c.ears {
+            let p = &doll.particles[base];
+            let (dx, dl, du) = (p.pos.x - sk.pos.x, p.side - sk.side, sk.pos.y - p.pos.y);
+            let d = (dx * dx + dl * dl + du * du).sqrt();
+            assert!(
+                (d - w.ear_radius).abs() < 0.5,
+                "ear base is {d:.1} from the skull, radius is {:.1}",
+                w.ear_radius
+            );
+        }
     }
 
     #[test]
