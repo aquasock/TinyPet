@@ -202,7 +202,10 @@ fn build() -> (Ragdoll, Creature) {
     let neck = *spine.last().unwrap();
     let skull = r.add(Particle::new(386.0, base_y - 26.0, 26.0, BODY));
     let muzzle = r.add(Particle::new(406.0, base_y - 16.0, 13.0, LIGHT));
-    let nose = r.add(Particle::new(416.0, base_y - 21.0, 5.0, DARK));
+    // Out on the tip, clear of the muzzle's own sphere. Closer in it counts as
+    // *inside* the muzzle and the containment rule hides it, which is what
+    // swallowed the black tip.
+    let nose = r.add(Particle::new(420.0, base_y - 20.0, 5.0, DARK));
     r.link(neck, skull);
     r.link(skull, muzzle);
     r.link(muzzle, nose);
