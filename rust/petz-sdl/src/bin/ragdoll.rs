@@ -877,6 +877,7 @@ fn main() -> Result<(), String> {
                     sdl2::keyboard::Keycode::P => {
                         report(light, steps, tex_idx, textures[tex_idx].0);
                         report_eyes(&walker);
+                        report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::K => {
                         if focus == Focus::Eyes {
