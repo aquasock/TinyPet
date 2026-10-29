@@ -333,8 +333,8 @@ impl Walker {
             heading_body: body.heading,
             facing: vec![body.heading; particles],
             lag,
-            eye_fwd: 404.0,
-            eye_out: 24.0,
+            eye_fwd: 414.0,
+            eye_out: 14.0,
             moving: 1.0,
         }
     }
@@ -419,6 +419,12 @@ impl Walker {
                     p.side = sign * self.eye_out;
                 }
             }
+            // Let the link follow the eye. Keeping the length it was built at
+            // meant the skeleton pulled the eye back towards the authored
+            // position, so it could never be moved far out of the head.
+            let sk = doll.particles[creature.skull].pos;
+            let want = doll.particles[sclera].pos.sub(sk).length();
+            doll.set_rest(creature.skull, sclera, want);
         }
 
         for (i, leg) in creature.legs.iter().enumerate() {
@@ -646,21 +652,24 @@ fn main() -> Result<(), String> {
                         tex_idx = (tex_idx + 1) % textures.len();
                         report(light, steps, tex_idx, textures[tex_idx].0);
                     }
-                    sdl2::keyboard::Keycode::P => report(light, steps, tex_idx, textures[tex_idx].0),
+                    sdl2::keyboard::Keycode::P => {
+                        report(light, steps, tex_idx, textures[tex_idx].0);
+                        println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
+                    }
                     sdl2::keyboard::Keycode::K => {
-                        walker.eye_out = (walker.eye_out - 0.5).max(4.0);
+                        walker.eye_out = (walker.eye_out - 0.5).max(0.0);
                         println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
                     }
                     sdl2::keyboard::Keycode::L => {
-                        walker.eye_out = (walker.eye_out + 0.5).min(24.0);
+                        walker.eye_out = (walker.eye_out + 0.5).min(34.0);
                         println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
                     }
                     sdl2::keyboard::Keycode::H => {
-                        walker.eye_fwd = (walker.eye_fwd - 1.0).max(370.0);
+                        walker.eye_fwd = (walker.eye_fwd - 1.0).max(360.0);
                         println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
                     }
                     sdl2::keyboard::Keycode::J => {
-                        walker.eye_fwd = (walker.eye_fwd + 1.0).min(414.0);
+                        walker.eye_fwd = (walker.eye_fwd + 1.0).min(440.0);
                         println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
                     }
                     sdl2::keyboard::Keycode::Z => {

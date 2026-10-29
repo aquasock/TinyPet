@@ -340,6 +340,17 @@ impl Ragdoll {
         }
     }
 
+    /// Reset the rest length of the spring between two balls. Used when a part
+    /// is driven to a new place: a link built at one length would otherwise
+    /// drag the part back towards where it was authored.
+    pub fn set_rest(&mut self, a: usize, b: usize, rest: f32) {
+        for c in self.constraints.iter_mut() {
+            if (c.a == a && c.b == b) || (c.a == b && c.b == a) {
+                c.rest = rest;
+            }
+        }
+    }
+
     /// Move a pinned particle to a point, carrying its stored position so the
     /// released velocity is the drag velocity. This is grab-and-throw.
     pub fn drag_to(&mut self, index: usize, target: Vec2) {
