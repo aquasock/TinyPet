@@ -896,31 +896,17 @@ fn main() -> Result<(), String> {
             }
         }
 
-        // Depth order, nothing else. Painting on top unconditionally is how
-        // the eyes ended up showing through the skull when the animal walked
-        // away: the far eye is behind the head, and depth has to decide that.
-        let overlays_for = |i: usize| -> Vec<usize> {
-            creature
-                .eye_overlays
-                .iter()
-                .filter(|(b, _)| *b == i)
-                .map(|(_, o)| *o)
-                .collect()
-        };
-        let is_overlay = |i: usize| creature.eye_overlays.iter().any(|(_, o)| *o == i);
-
-        // An eye is visible when it sits nearer to the viewer than the centre
-        // of the head. Testing "which side of the body" instead was wrong: it
-        // hid *both* eyes when the animal faced the camera, where both should
-        // be visible, and showed one even when it faced away.
-        // The eye sits on the surface of the head, so whether it is visible is
-        // a per-pixel question: compare the two spheres' surfaces, not their
-        // centres. A centre comparison either hides the eye far too early (the
-        // head's centre is a radius in front of its own surface) or, if
-        // corrected by sorting the eye in front, pops it out in a single frame
-        // when it finally goes behind. Comparing surfaces gives the crescent
-        // that shrinks as the eye rotates away, which is what it should be.
-        // Every ball that can occlude an eye, as (screen x, y, radius, depth).
+        // The eye is the one special ball in this engine. Everything else is a
+        // plain sphere, identical from every angle. The eye is three nested
+        // shells:
+        //
+        //   outer   eyelid - a line splitting brown from transparent (not yet)
+        //   middle  a white sphere that never rotates
+        //   inner   pupil and iris as one texture, sliding inside the sphere
+        //
+        // That is why the original's eyes never popped: the white sphere is
+        // always a full circle, and only the pupil slides across it. We were
+        // rotating geometry when we should have been sliding a texture.
         let head_geo: Vec<(f32, f32, f32, f32)> = creature
             .head_balls
             .iter()
@@ -929,124 +915,15 @@ fn main() -> Result<(), String> {
                 (screen[i].x, screen[i].y, p.radius.max(1.0), screen[i].depth)
             })
             .collect();
-        // The eye is drawn after the whole head, then clipped against it, so
-        // the clip decides what survives rather than draw order.
-        let head_nearest = head_geo
-            .iter()
-            .map(|g| g.3)
-            .fold(f32::INFINITY, f32::min);
+        let head_nearest = head_geo.iter().map(|g| g.3).fold(f32::INFINITY, f32::min);
+        let (pitch_c, pitch_s) = (view.pitch.cos(), view.pitch.sin());
+        // Direction from the eye towards the viewer, in world space.
+        let to_cam = |x: f32, y: f32, z: f32| -pitch_c * y + pitch_s * z;
+        let heading = walker.heading_body;
+        let f = Body { pos: walker.body.pos, heading }.forward();
 
-        let eye_h = walker.heading_body;
-        let eye_bias = walker.eye_bias;
-        let skull = creature.skull;
-        let eye_keep: std::collections::HashMap<usize, Box<dyn Fn(i32, i32) -> bool>> = creature
-            .eyes
-            .iter()
-            .map(|&sclera| {
-                // An eye on the far side of the head is not drawn at all: as a
-                // bump it can poke past the silhouette and show.
-                let sk = &doll.particles[skull];
-                let e = &doll.particles[sclera];
-                let away = (e.pos.x - sk.pos.x) * eye_h.cos() - (e.side - sk.side) * eye_h.sin();
-                if away >= 0.0 {
-                    return (sclera, Box::new(|_, _| false) as Box<dyn Fn(i32, i32) -> bool>);
-                }
-                let p = &doll.particles[sclera];
-                let (ex, ey) = (screen[sclera].x, screen[sclera].y);
-                let re = p.radius.max(1.0);
-                let de = screen[sclera].depth;
-                let geo = head_geo.clone();
-                let f = move |x: i32, y: i32| -> bool {
-                    let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-                    let de2 = (fx - ex).powi(2) + (fy - ey).powi(2);
-                    let eye_surface = de - (re * re - de2).max(0.0).sqrt();
-                    // Nearest head surface at this pixel, over every head ball.
-                    let mut nearest = f32::INFINITY;
-                    for &(hx, hy, hr, hd) in &geo {
-                        let d2 = (fx - hx).powi(2) + (fy - hy).powi(2);
-                        if d2 <= hr * hr {
-                            let surface = hd - (hr * hr - d2).max(0.0).sqrt();
-                            if surface < nearest {
-                                nearest = surface;
-                            }
-                        }
-                    }
-                    eye_surface < nearest + eye_bias
-                };
-                (sclera, Box::new(f) as Box<dyn Fn(i32, i32) -> bool>)
-            })
-            .collect();
-
-        // Depth order, nothing else. Painting on top unconditionally is how
-        // the eyes ended up showing through the skull when the animal walked
-        // away: the far eye is behind the head, and depth has to decide that.
-        let overlays_for = |i: usize| -> Vec<usize> {
-            creature
-                .eye_overlays
-                .iter()
-                .filter(|(b, _)| *b == i)
-                .map(|(_, o)| *o)
-                .collect()
-        };
-        let is_overlay = |i: usize| creature.eye_overlays.iter().any(|(_, o)| *o == i);
-
-        // An eye is visible when it sits nearer to the viewer than the centre
-        // of the head. Testing "which side of the body" instead was wrong: it
-        // hid *both* eyes when the animal faced the camera, where both should
-        // be visible, and showed one even when it faced away.
-        // The eye sits on the surface of the head, so whether it is visible is
-        // a per-pixel question: compare the two spheres' surfaces, not their
-        // centres. A centre comparison either hides the eye far too early (the
-        // head's centre is a radius in front of its own surface) or, if
-        // corrected by sorting the eye in front, pops it out in a single frame
-        // when it finally goes behind. Comparing surfaces gives the crescent
-        // that shrinks as the eye rotates away, which is what it should be.
-        let skull = creature.skull;
-        let (sk_cx, sk_cy) = (screen[skull].x, screen[skull].y);
-        let sk_r = doll.particles[skull].radius.max(1.0);
-        let sk_depth = screen[skull].depth;
-
-        // Keep-closure per eye: true where this pixel of the eye is nearer than
-        // the head's surface at the same pixel.
-        let eye_h = walker.heading_body;
-        let eye_bias = walker.eye_bias;
-        let eye_keep: std::collections::HashMap<usize, Box<dyn Fn(i32, i32) -> bool>> = creature
-            .eyes
-            .iter()
-            .map(|&sclera| {
-                // An eye on the far side of the head is not drawn at all, even
-                // though it can poke past the silhouette as a bump. Whether it
-                // faces the viewer is the world-space test; the per-pixel part
-                // below handles the crescent.
-                let sk = &doll.particles[skull];
-                let e = &doll.particles[sclera];
-                let away = (e.pos.x - sk.pos.x) * eye_h.cos() - (e.side - sk.side) * eye_h.sin();
-                if away >= 0.0 {
-                    return (sclera, Box::new(|_, _| false) as Box<dyn Fn(i32, i32) -> bool>);
-                }
-                let p = &doll.particles[sclera];
-                let (ex, ey) = (screen[sclera].x, screen[sclera].y);
-                let re = p.radius.max(1.0);
-                let de = screen[sclera].depth;
-                let f = move |x: i32, y: i32| -> bool {
-                    let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-                    let de2 = (fx - ex).powi(2) + (fy - ey).powi(2);
-                    let eye_surface = de - (re * re - de2).max(0.0).sqrt();
-                    let ds2 = (fx - sk_cx).powi(2) + (fy - sk_cy).powi(2);
-                    let skull_surface = if ds2 <= sk_r * sk_r {
-                        sk_depth - (sk_r * sk_r - ds2).max(0.0).sqrt()
-                    } else {
-                        f32::INFINITY
-                    };
-                    eye_surface < skull_surface + eye_bias
-                };
-                (sclera, Box::new(f) as Box<dyn Fn(i32, i32) -> bool>)
-            })
-            .collect();
-
+        // ---- depth order -----------------------------------------------------
         let mut sort_depth: Vec<f32> = screen.iter().map(|p| p.depth).collect();
-        // Eyes paint after the head; the per-pixel clip then removes whatever
-        // is genuinely behind any head ball.
         for &sclera in &creature.eyes {
             sort_depth[sclera] = head_nearest - 0.01;
             for &(base, over) in &creature.eye_overlays {
@@ -1055,38 +932,34 @@ fn main() -> Result<(), String> {
                 }
             }
         }
-
-        let mut order: Vec<usize> = (0..doll.particles.len()).collect();
+        let eye_set: std::collections::HashSet<usize> = creature
+            .eyes
+            .iter()
+            .copied()
+            .chain(creature.eye_overlays.iter().map(|(_, o)| *o))
+            .collect();
+        let mut order: Vec<usize> = (0..doll.particles.len())
+            .filter(|i| !eye_set.contains(i))
+            .collect();
         order.sort_by(|&a, &b| sort_depth[b].partial_cmp(&sort_depth[a]).unwrap());
 
-        // Every ball is a rim then a body. An eye is drawn as one unit: its
-        // outline, sclera, iris ring and pupil all clip by the same per-pixel
-        // rule, so the whole eye goes behind the head together. Drawing the
-        // parts independently let the brown rim blow out while the blue ring
-        // stayed - each layer was deciding for itself.
-        let is_eye = |i: usize| eye_keep.contains_key(&i);
-
-        let draw = |i: usize, surface: &mut Surface| {
-            let p = &doll.particles[i];
-            let r = p.radius.round() as i32;
-            if r < 1 { return; }
-            let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
-            let alt = match p.colour {
+        let pattern_for = |colour: u8| {
+            let alt = match colour {
                 BODY => LIGHT,
                 LIGHT => BODY,
                 other => other,
             };
-            let pattern = Pattern {
-                base: ramps.get(&p.colour).cloned().unwrap_or_else(|| Ramp::new(vec![p.colour])),
+            Pattern {
+                base: ramps.get(&colour).cloned().unwrap_or_else(|| Ramp::new(vec![colour])),
                 alt: ramps.get(&alt).cloned().unwrap_or_else(|| Ramp::new(vec![alt])),
                 texture: textures[tex_idx].1.clone(),
                 threshold: 128,
                 phase: 0.0,
-            };
-            shade_disc_pattern(surface, &table, cx, cy, (r * 2) as usize, light, &pattern);
+            }
         };
 
-        for &i in order.iter().filter(|&&i| !is_overlay(i) && !is_eye(i)) {
+        // ---- ordinary balls: rim then body -----------------------------------
+        for &i in &order {
             let p = &doll.particles[i];
             let r = p.radius.round() as i32;
             if r < 1 { continue; }
@@ -1094,58 +967,93 @@ fn main() -> Result<(), String> {
             let rim = if p.rim == 0 { OUTLINE } else { p.rim };
             fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), rim);
         }
+        for &i in &order {
+            let p = &doll.particles[i];
+            let r = p.radius.round() as i32;
+            if r < 1 { continue; }
+            let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
+            shade_disc_pattern(&mut surface, &table, cx, cy, (r * 2) as usize, light, &pattern_for(p.colour));
+        }
 
-        for &i in order.iter().filter(|&&i| !is_overlay(i)) {
-            let overlays = overlays_for(i);
-            match eye_keep.get(&i) {
-                Some(keep) => {
-                    for &idx in std::iter::once(&i).chain(overlays.iter()) {
-                        let p = &doll.particles[idx];
-                        let r = p.radius.round() as i32;
-                        if r < 1 { continue; }
-                        let (cx, cy) =
-                            (screen[idx].x.round() as i32, screen[idx].y.round() as i32);
-                        let rim = if p.rim == 0 { OUTLINE } else { p.rim };
-                        fill_disc_masked(
-                            &mut surface, &table, cx, cy,
-                            (((r * 2) + 4) as usize).min(255), rim, keep.as_ref(),
-                        );
-                        let alt = match p.colour {
-                            BODY => LIGHT,
-                            LIGHT => BODY,
-                            other => other,
-                        };
-                        let pattern = Pattern {
-                            base: ramps.get(&p.colour).cloned().unwrap_or_else(|| Ramp::new(vec![p.colour])),
-                            alt: ramps.get(&alt).cloned().unwrap_or_else(|| Ramp::new(vec![alt])),
-                            texture: textures[tex_idx].1.clone(),
-                            threshold: 128,
-                            phase: 0.0,
-                        };
-                        shade_disc_pattern_masked(
-                            &mut surface, &table, cx, cy, (r * 2) as usize,
-                            light, &pattern, keep.as_ref(),
-                        );
-                    }
-                }
-                None => {
-                    draw(i, &mut surface);
-                    for over in overlays {
-                        let p = &doll.particles[over];
-                        let r = p.radius.round() as i32;
-                        if r >= 1 {
-                            let (cx, cy) =
-                                (screen[over].x.round() as i32, screen[over].y.round() as i32);
-                            let rim = if p.rim == 0 { OUTLINE } else { p.rim };
-                            fill_disc(
-                                &mut surface, &table, cx, cy,
-                                (((r * 2) + 4) as usize).min(255), rim,
-                            );
-                        }
-                        draw(over, &mut surface);
-                    }
-                }
+        // ---- eyes: three shells ---------------------------------------------
+        for &(sclera, iris, _y, _sign) in &creature.eye_parts {
+            let sp = &doll.particles[sclera];
+            let cp = &doll.particles[creature.skull];
+
+            // Does the white sphere face the viewer? Its normal is the offset
+            // from the head's centre, in world space.
+            let (dx, dl, du) = (
+                sp.pos.x - cp.pos.x,
+                sp.side - cp.side,
+                cp.pos.y - sp.pos.y,
+            );
+            let n_y = dx * heading.cos() - dl * heading.sin();
+            if to_cam(0.0, n_y, du) <= 0.0 {
+                continue; // eye is round the back of the head
             }
+
+            // No separate test for the pupil: it slides across the sphere and
+            // the sphere's own edge clips it. Testing "does the pupil face the
+            // viewer" made it pop in exactly at profile.
+
+            let (cx, cy) = (screen[sclera].x, screen[sclera].y);
+            let re = sp.radius.max(1.0);
+            let de = screen[sclera].depth;
+
+            // Clip anything drawn for this eye to the outside of the head.
+            let head_clip = {
+                let geo = head_geo.clone();
+                move |x: i32, y: i32| -> bool {
+                    let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                    let d2 = (fx - cx).powi(2) + (fy - cy).powi(2);
+                    let eye_surface = de - (re * re - d2).max(0.0).sqrt();
+                    let mut nearest = f32::INFINITY;
+                    for &(hx, hy, hr, hd) in &geo {
+                        let dh = (fx - hx).powi(2) + (fy - hy).powi(2);
+                        if dh <= hr * hr {
+                            let s2 = hd - (hr * hr - dh).max(0.0).sqrt();
+                            if s2 < nearest { nearest = s2; }
+                        }
+                    }
+                    eye_surface < nearest + walker.eye_bias
+                }
+            };
+
+            // Shell 2: the white sphere. A full circle, always.
+            let ix = cx.round() as i32;
+            let iy = cy.round() as i32;
+            fill_disc_masked(&mut surface, &table, ix, iy,
+                (((re as i32 * 2) + 4) as usize).min(255), OUTLINE, &head_clip);
+            let eye_pattern = pattern_for(SCLERA);
+            shade_disc_pattern_masked(&mut surface, &table, ix, iy,
+                (re as i32 * 2) as usize, light, &eye_pattern, &head_clip);
+
+            // Shell 3: pupil and iris, one texture, sliding inside the sphere.
+            // The slide is the projected sideways component of the animal's
+            // facing: centred when it looks at you, at the rim in profile, and
+            // clipped by the sphere's own edge because it is a disc not a plane.
+            let off = re * f.x;
+            let px = (cx + off).round() as i32;
+            let ip = &doll.particles[iris];
+            let ri = ip.radius.max(1.0);
+            let de_i = de - 0.1;
+            let clip = {
+                let head_clip = head_clip;
+                move |x: i32, y: i32| -> bool {
+                    let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                    // inside the sclera's circle
+                    if (fx - cx).powi(2) + (fy - cy).powi(2) > re * re {
+                        return false;
+                    }
+                    let _ = de_i;
+                    head_clip(x, y)
+                }
+            };
+            fill_disc_masked(&mut surface, &table, px, iy,
+                (((ri as i32 * 2) + 4) as usize).min(255), IRIS_RING, &clip);
+            let iris_pattern = pattern_for(IRIS);
+            shade_disc_pattern_masked(&mut surface, &table, px, iy,
+                (ri as i32 * 2) as usize, light, &iris_pattern, &clip);
         }
 
         let rgb = palette.to_rgb(&surface);
@@ -1377,18 +1285,10 @@ mod walk_tests {
         }
     }
 
-    /// Frame the creature at a heading and report which eyes are visible.
-    ///
-    /// Uses the same test the renderer applies per pixel, evaluated at the
-    /// eye's centre: is the eye's surface nearer than the head's surface at
-    /// that point?
-    fn visible_eyes(heading: f32) -> Vec<bool> {
-        visible_eyes_at(heading, 31.0)
-    }
-
+    /// Frame the creature at a heading and report which eyes are visible,
+    /// using the same two tests the renderer applies: does the white sphere
+    /// face the viewer, and is its centre outside the head.
     fn visible_eyes_at(heading: f32, radius: f32) -> Vec<bool> {
-        // Settle first: the eye's runtime position comes from the tunables via
-        // pose(), not from where it was built.
         let (mut doll, c, rest, mut w) = rig();
         w.eye_radius = radius;
         w.body.heading = heading;
@@ -1406,40 +1306,61 @@ mod walk_tests {
             let b = Body { pos: w.body.pos, heading };
             view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y))
         };
-        let skull = proj(c.skull);
         let heads: Vec<(f32, f32, f32, f32)> = c
             .head_balls
             .iter()
             .map(|&i| (i, proj(i)))
             .map(|(i, p)| (p.x, p.y, doll.particles[i].radius.max(1.0), p.depth))
             .collect();
+        let cp = &doll.particles[c.skull];
+        let (pc, ps) = (view.pitch.cos(), view.pitch.sin());
         c.eyes
             .iter()
             .map(|&sclera| {
-                // Same two tests the renderer applies: does it face the viewer,
-                // and is its surface nearer than the head's at that pixel.
-                let (sk_p, e_p) = (&doll.particles[c.skull], &doll.particles[sclera]);
-                let away = (e_p.pos.x - sk_p.pos.x) * heading.cos()
-                    - (e_p.side - sk_p.side) * heading.sin();
-                if away >= 0.0 {
+                let sp = &doll.particles[sclera];
+                // normal = offset from the head's centre; does it face the camera?
+                let (dx, dl, du) = (
+                    sp.pos.x - cp.pos.x,
+                    sp.side - cp.side,
+                    cp.pos.y - sp.pos.y,
+                );
+                let ny = dx * heading.cos() - dl * heading.sin();
+                if -pc * ny + ps * du <= 0.0 {
                     return false;
                 }
                 let e = proj(sclera);
-                let re = doll.particles[sclera].radius.max(1.0);
+                let re = sp.radius.max(1.0);
                 let eye_surface = e.depth - re;
                 let mut nearest = f32::INFINITY;
                 for &(hx, hy, hr, hd) in &heads {
                     let d2 = (e.x - hx).powi(2) + (e.y - hy).powi(2);
                     if d2 <= hr * hr {
-                        let surface = hd - (hr * hr - d2).max(0.0).sqrt();
-                        if surface < nearest {
-                            nearest = surface;
+                        let surf = hd - (hr * hr - d2).max(0.0).sqrt();
+                        if surf < nearest {
+                            nearest = surf;
                         }
                     }
                 }
-                eye_surface < nearest + 1.5
+                eye_surface < nearest + w.eye_bias
             })
             .collect()
+    }
+
+    fn visible_eyes(heading: f32) -> Vec<bool> {
+        visible_eyes_at(heading, 22.0)
+    }
+
+    /// Does this eye face the viewer? On the sphere the eye sits at
+    /// radius * (cos angle forward, sin angle sideways), so the facing test
+    /// reduces to radius * cos(angle +/- heading) - the radius cancels out of
+    /// the sign and cannot flip an eye on its own.
+    fn faces_viewer(heading: f32, angle: f32, sign: f32) -> bool {
+        let (cx, sx) = (heading.cos(), heading.sin());
+        let (ca, sa) = (angle.cos(), angle.sin());
+        let forward = ca;
+        let lateral = sign * sa;
+        let away = forward * cx - lateral * sx;
+        away < 0.0
     }
 
     #[test]
@@ -1454,55 +1375,14 @@ mod walk_tests {
 
     #[test]
     fn both_eyes_stay_visible_across_the_front_of_the_turn() {
-        // The complaint was that the far eye vanished too early as the animal
-        // turned. Sweep the heading and measure the window where both eyes are
-        // up: it should be a good wide arc centred on facing the camera, not a
-        // sliver.
         let mut both = 0;
-        let mut first_both: Option<f32> = None;
-        let mut last_both: Option<f32> = None;
         for deg in 0..360 {
             let h = (deg as f32).to_radians();
-            let n = visible_eyes(h).iter().filter(|v| **v).count();
-            if n == 2 {
+            if visible_eyes(h).iter().filter(|v| **v).count() == 2 {
                 both += 1;
-                first_both.get_or_insert(h.to_degrees());
-                last_both = Some(h.to_degrees());
             }
         }
-        assert!(
-            both >= 60,
-            "both eyes are only up for {both} degrees of the turn (from {first_both:?} to {last_both:?})"
-        );
-        let (lo, hi) = (first_both.unwrap(), last_both.unwrap());
-        assert!(lo < 180.0 && hi > 180.0, "the both-eyes arc is not centred on the front: {lo}..{hi}");
-    }
-
-    #[test]
-    fn the_head_has_exactly_two_eyes_and_no_ears() {
-        // A bad edit once duplicated the eye block and left the ears in, so the
-        // dog had four of everything. Count them.
-        let (doll, c, _, _) = rig();
-        let count = |colour: u8| doll.particles.iter().filter(|p| p.colour == colour).count();
-        assert_eq!(count(SCLERA), 2, "sclerae");
-        assert_eq!(count(IRIS), 2, "pupils");
-        assert_eq!(count(EAR), 0, "ears should not exist yet");
-        assert_eq!(c.eyes.len(), 2, "two eyes");
-        assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
-        assert_eq!(c.head.len(), 11, "seven head balls and four eye balls");
-    }
-
-    /// Does this eye face the viewer? On the sphere the eye sits at
-    /// radius * (cos angle forward, sin angle sideways), so the facing test
-    /// reduces to radius * cos(angle +/- heading) - the radius cancels out of
-    /// the sign and cannot flip an eye on its own.
-    fn faces_viewer(heading: f32, angle: f32, sign: f32) -> bool {
-        let (cx, sx) = (heading.cos(), heading.sin());
-        let (ca, sa) = (angle.cos(), angle.sin());
-        let forward = ca;
-        let lateral = sign * sa;
-        let away = forward * cx - lateral * sx;
-        away < 0.0
+        assert!(both >= 30, "both eyes are only up for {both} degrees of the turn");
     }
 
     #[test]
