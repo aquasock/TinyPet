@@ -101,9 +101,8 @@ struct Creature {
     eye_overlays: Vec<(usize, usize)>,
     /// The skull, used as the reference the eyes are tested against.
     skull: usize,
-    /// (sclera, lid) for each eye. The lid is not a retail ball - Petz
-    /// parameterises it - but a lid ball is the cheapest way to draw one.
-    eye_lids: Vec<(usize, usize)>,
+    /// The sclera of each eye, for the visibility test.
+    eyes: Vec<usize>,
 }
 
 fn build() -> (Ragdoll, Creature) {
@@ -161,12 +160,11 @@ fn build() -> (Ragdoll, Creature) {
     // until the eyes are right we cannot tell what is hiding what.
     let mut eyes = Vec::new();
     let mut overlay_pairs: Vec<(usize, usize)> = Vec::new();
-    let mut lid_pairs: Vec<(usize, usize)> = Vec::new();
+    let mut eye_list: Vec<usize> = Vec::new();
     for side in EYE_SIDES {
         let sclera = r.add(Particle::new(394.0, base_y - 34.0, 10.0, SCLERA));
         let iris = r.add(Particle::new(394.0, base_y - 33.0, 6.0, IRIS));
-        let lid = r.add(Particle::new(394.0, base_y - 58.0, 11.0, BODY));
-        for i in [sclera, iris, lid] {
+        for i in [sclera, iris] {
             r.particles[i].side = side;
             r.particles[i].rest_side = side;
         }
@@ -178,12 +176,10 @@ fn build() -> (Ragdoll, Creature) {
         // Unlinked they were free particles: any grab cleared their drive and
         // they simply fell out of the head.
         r.link(sclera, iris);
-        r.link(sclera, lid);
 
-        eyes.extend([sclera, iris, lid]);
+        eyes.extend([sclera, iris]);
         overlay_pairs.push((sclera, iris));
-        overlay_pairs.push((sclera, lid));
-        lid_pairs.push((sclera, lid));
+        eye_list.push(sclera);
     }
 
     // Legs. The front pair hangs off the ball *behind* the neck - the shoulder -
@@ -222,7 +218,7 @@ fn build() -> (Ragdoll, Creature) {
 
     let mut head = vec![skull, muzzle, nose];
     head.extend(eyes);
-    (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eye_lids: lid_pairs })
+    (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eyes: eye_list })
 }
 
 /// The walking controller: owns the clock, the world position, and the pose.
@@ -239,10 +235,6 @@ struct Walker {
     facing: Vec<f32>,
     lag: Vec<f32>,
     walking: bool,
-    /// Blink clock, in seconds, cycling through a short close-and-open.
-    clock: f32,
-    /// 1.0 is a fully open eye, 0.0 fully closed.
-    lid_open: f32,
 }
 
 /// Fastest the animal's body can turn, in radians per second.
@@ -279,8 +271,6 @@ impl Walker {
             facing: vec![body.heading; particles],
             lag,
             walking: true,
-            clock: 0.0,
-            lid_open: 1.0,
         }
     }
 
@@ -308,18 +298,6 @@ impl Walker {
         // round while standing.
         self.turn(dt);
 
-        // A blink every few seconds. Cheap, and it proves the lid is real.
-        self.clock += dt;
-        if self.clock > 3.6 {
-            self.clock = 0.0;
-        }
-        self.lid_open = if self.clock < 0.09 {
-            self.clock / 0.09
-        } else if self.clock < 0.18 {
-            (0.18 - self.clock) / 0.09
-        } else {
-            1.0
-        };
         if !self.walking {
             return;
         }
@@ -350,17 +328,6 @@ impl Walker {
         }
         for (i, &p) in creature.head.iter().enumerate() {
             doll.drive_to(p, Vec2::new(rest.head[i].x, rest.head[i].y + lift), 0.4);
-        }
-
-        // Drop the lid over the eye as it closes. Open, it sits clear above the
-        // eye; closed, it is centred on it.
-        for &(sclera, lid) in &creature.eye_lids {
-            let k = creature.head.iter().position(|&h| h == sclera);
-            let Some(k) = k else { continue };
-            let base = rest.head[k];
-            let r = doll.particles[sclera].radius;
-            let y = base.y + lift - self.lid_open * (r * 2.0 + 3.0);
-            doll.drive_to(lid, Vec2::new(base.x, y), 0.8);
         }
 
         for (i, leg) in creature.legs.iter().enumerate() {
@@ -770,7 +737,7 @@ fn main() -> Result<(), String> {
         // be visible, and showed one even when it faced away.
         let mut hidden: Vec<bool> = vec![false; doll.particles.len()];
         let eye_h = walker.heading_body;
-        for &(sclera, _) in &creature.eye_lids {
+        for &sclera in &creature.eyes {
             // An eye is visible while it is on the viewer's side of the head.
             // This has to be the horizontal offset only: comparing projected
             // depth folds in the eye's height above the skull centre, which
@@ -1095,9 +1062,9 @@ mod walk_tests {
         for f in w.facing.iter_mut() {
             *f = heading;
         }
-        c.eye_lids
+        c.eyes
             .iter()
-            .map(|&(sclera, _)| {
+            .map(|&sclera| {
                 let (eye, head) = (&doll.particles[sclera], &doll.particles[c.skull]);
                 let dfwd = eye.pos.x - head.pos.x;
                 let dlat = eye.side - head.side;
@@ -1151,9 +1118,9 @@ mod walk_tests {
         assert_eq!(count(SCLERA), 2, "sclerae");
         assert_eq!(count(IRIS), 2, "pupils");
         assert_eq!(count(EAR), 0, "ears should not exist yet");
-        assert_eq!(c.eye_lids.len(), 2, "one lid per eye");
-        assert_eq!(c.eye_overlays.len(), 4, "pupil and lid per eye");
-        assert_eq!(c.head.len(), 9, "skull, muzzle, nose and six eye balls");
+        assert_eq!(c.eyes.len(), 2, "two eyes");
+        assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
+        assert_eq!(c.head.len(), 7, "skull, muzzle, nose and four eye balls");
     }
 
     #[test]
