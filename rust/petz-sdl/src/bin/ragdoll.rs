@@ -662,11 +662,10 @@ fn eye_pixel_ok(
 
 fn report_ears(w: &Walker) {
     println!(
-        "ears: angle {:.0} deg  radius {:.1}  width {:.1}  sink {:.2}  bias {:.1}",
+        "ears: angle {:.0} deg  radius {:.1}  width {:.1}  bias {:.1}",
         w.ear_angle.to_degrees(),
         w.ear_radius,
         w.ear_width,
-        w.ear_sink,
         w.ear_bias
     );
 }
@@ -857,11 +856,11 @@ fn main() -> Result<(), String> {
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::K => {
-                        walker.ear_angle = (walker.ear_angle - 2.0_f32.to_radians()).max(-1.2);
+                        walker.ear_angle = (walker.ear_angle - 1.0_f32.to_radians()).max(-1.2);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::L => {
-                        walker.ear_angle = (walker.ear_angle + 2.0_f32.to_radians()).min(1.2);
+                        walker.ear_angle = (walker.ear_angle + 1.0_f32.to_radians()).min(1.2);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::H => {
@@ -872,12 +871,15 @@ fn main() -> Result<(), String> {
                         walker.ear_radius = (walker.ear_radius + 1.0).min(70.0);
                         report_ears(&walker);
                     }
+                    // Height as an angle round the head's centre, not an offset
+                    // from the ground: raising an ear walks it up the sphere,
+                    // the way its radius and width already do.
                     sdl2::keyboard::Keycode::PageUp => {
-                        walker.ear_sink = (walker.ear_sink + 0.05).min(0.9);
+                        walker.ear_angle = (walker.ear_angle - 1.0_f32.to_radians()).max(-1.2);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::PageDown => {
-                        walker.ear_sink = (walker.ear_sink - 0.05).max(0.0);
+                        walker.ear_angle = (walker.ear_angle + 1.0_f32.to_radians()).min(1.2);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::N => {
