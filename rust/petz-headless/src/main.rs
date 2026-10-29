@@ -69,6 +69,90 @@ fn main() {
             println!("pixel hash (fnv1a) : {:016x}", fnv1a(surface.pixels()));
             println!("wrote              : {}", out.display());
         }
+        "demo" => {
+            let table = load_table().expect("evidence/ball/tables.raw missing");
+            let palette = load_palette().expect("evidence/ball/ball-input.raw missing");
+
+            // Contact sheet: the rasterizer's primitive across the diameter
+            // range the table supports, drawn with the game's own palette.
+            let (w, h) = (640usize, 400usize);
+            let mut surface = Surface::new(w, h);
+            // Background: a mid palette entry rather than black, so silhouettes read.
+            for y in 0..h {
+                for x in 0..w {
+                    surface.set(x, y, 12);
+                }
+            }
+
+            let diameters = [12usize, 19, 27, 38, 52, 70, 92, 120, 155, 190, 230];
+            let mut cx = 70i32;
+            let mut cy = 90i32;
+            let mut per_row = 0;
+            for d in diameters {
+                fill_disc(&mut surface, &table, cx, cy, d, 80);
+                cx += 100;
+                per_row += 1;
+                if per_row == 5 { cx = 70; cy = 250; }
+            }
+
+            let rgb = palette.to_rgb(&surface);
+            let out = args.get(1).map(PathBuf::from)
+                .unwrap_or_else(|| repo_root().join("build/demo.ppm"));
+            if let Some(parent) = out.parent() { let _ = fs::create_dir_all(parent); }
+            write_ppm(&out, w, h, &rgb).expect("write ppm");
+            println!("diameters drawn : {:?}", diameters);
+            println!("pixel hash      : {:016x}", fnv1a(surface.pixels()));
+            println!("wrote           : {}", out.display());
+        }
+        "compare" => {
+            // Captured ball vs our render, side by side and enlarged.
+            let table = load_table().expect("tables.raw missing");
+            let palette = load_palette().expect("ball-input.raw missing");
+
+            let raw = fs::read(repo_root().join("evidence/ball/ball-input.raw"))
+                .expect("read capture");
+            let word = |i: usize| u32::from_le_bytes(raw[i*4..i*4+4].try_into().unwrap());
+            let (stride, min_x, min_y) = (word(3) as usize, word(4) as usize, word(5) as usize);
+            let (bw, bh) = (word(6) as usize, word(7) as usize);
+            let header = raw.len() - (1024 + 512 + 2 * stride * (word(1) as usize));
+            let after_off = header + 1024 + 512 + stride * (word(1) as usize);
+
+            let scale = 8usize;
+            let panel_w = bw * scale;
+            let (w, h) = (panel_w * 2 + 16, bh * scale);
+            let mut out = Surface::new(w, h);
+            for y in 0..h { for x in 0..w { out.set(x, y, 12); } }
+
+            // Left panel: the real capture.
+            for y in 0..bh {
+                for x in 0..bw {
+                    let px = raw[after_off + (min_y + y) * stride + min_x + x];
+                    for sy in 0..scale { for sx in 0..scale {
+                        out.set(x*scale+sx, y*scale+sy, px);
+                    }}
+                }
+            }
+
+            // Right panel: our rasterizer, same diameter, same centre.
+            let mut ours = Surface::new(bw, bh);
+            fill_disc(&mut ours, &table, 9, 9, 19, 18);
+            for y in 0..bh {
+                for x in 0..bw {
+                    let px = ours.get(x, y).unwrap_or(12);
+                    for sy in 0..scale { for sx in 0..scale {
+                        out.set(panel_w + 16 + x*scale+sx, y*scale+sy, px);
+                    }}
+                }
+            }
+
+            let rgb = palette.to_rgb(&out);
+            let path = args.get(1).map(PathBuf::from)
+                .unwrap_or_else(|| repo_root().join("build/compare.ppm"));
+            if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
+            write_ppm(&path, w, h, &rgb).expect("write ppm");
+            println!("left: captured   right: petz-core fill_disc (same palette)");
+            println!("wrote: {}", path.display());
+        }
         "lnz" => {
             let path = args.get(1).expect("usage: petz-headless lnz FILE");
             let text = fs::read_to_string(path).expect("read lnz");
