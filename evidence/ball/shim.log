@@ -1,0 +1,18 @@
+proxy attach
+hooks installed: 7
+fill hook: installed at RVA 0x3ad50
+palette entries=256
+present BitBlt 0 406x396
+present BitBlt 1 406x396
+present BitBlt 2 406x396
+DIB 640x480 8bpp stride=640
+DIB 640x480 32bpp stride=2560
+DIB 896x736 8bpp stride=896
+DIB 896x736 32bpp stride=3584
+DIB 1024x768 8bpp stride=1024
+DIB 76x90 8bpp stride=76
+fill call 1
+fill call 2
+ball captured: 896x736 changed=556 bbox=35x26 at 250,276
+DIB 77x88 8bpp stride=80
+fill call 3

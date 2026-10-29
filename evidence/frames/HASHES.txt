@@ -1,0 +1,7 @@
+# sha256 of framebuffer dumps. Produced by two independent cold runs
+# (pin-A and pin-B) from a restored prefix snapshot; both runs agreed.
+# Regenerate with tools/pin-run.sh, verify with tools/verify-evidence.py.
+f0a18ba45c4c1a462c113f79ec4171d88bab5ec6d0984108282c1fc059169952  dib-f1000-8bpp.raw
+08a01b15d10368b16f5a6ef36283384354c931ec2f66020c2cc9a9cc17813347  dib-f2000-8bpp.raw
+c680379ab4fe07050917d688aa88964bbb49d0dad0f7abfa7d8cd7c6decde664  dib-f3000-8bpp.raw
+53536de2a8f4ec838d9f1ee7ba9edadf8281e8d7179a05d62311a49d92774dfd  dib-f4000-8bpp.raw

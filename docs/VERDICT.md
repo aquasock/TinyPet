@@ -94,5 +94,15 @@ PETZ_FILL_HOOK=1 ./tools/launch.sh --detach     # on a headless display
 python3 tools/analyze-ball.py build/install/ball-input-0.raw
 ```
 
-Artefacts: `build/frames/ball-capture/` (raw capture, decoded table),
-`docs/BINARY_NOTES.md` (all binary findings with addresses).
+Artefacts: `evidence/` (raw capture, decoded table, frame hashes — committed so
+the claims above can be re-checked), `docs/BINARY_NOTES.md` (all binary findings
+with addresses).
+
+Re-check the verdict without running the game:
+
+```sh
+python3 tools/verify-evidence.py
+```
+
+It verifies the frame hashes and re-derives the 285/285 silhouette result from
+the committed capture.
