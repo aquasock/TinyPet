@@ -31,7 +31,7 @@ use petz_core::gait::{two_bone_ik, Gait, GaitSpec};
 use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
 use petz_core::project::{Body, Projected, Vec3 as WVec3, View};
 use petz_core::shade::{Light, Ramp, Vec3};
-use petz_core::{fill_disc, fill_disc_masked, fill_ring_masked, Palette, SpanTable, Surface};
+use petz_core::{draw_disc, draw_ring, DepthBuffer, Paint, Palette, SpanTable, Surface};
 use std::fs;
 use std::path::PathBuf;
 
@@ -659,6 +659,7 @@ fn main() -> Result<(), String> {
     let mut sweep_last = Instant::now();
     let mut frame_no = 0u32;
     let mut held: std::collections::HashSet<Keycode> = std::collections::HashSet::new();
+    let mut depth = DepthBuffer::new(W, H);
     let mut events = sdl.event_pump()?;
     let mut paused = false;
     let step = 1.0 / 120.0;
@@ -923,9 +924,19 @@ fn main() -> Result<(), String> {
         }
 
         let now = Instant::now();
-        acc += (now - last).as_secs_f64().min(0.1);
+        let frame_dt = (now - last).as_secs_f32().min(0.1);
+        acc += frame_dt as f64;
         last = now;
-        let moving = if held.contains(&Keycode::W) {
+
+        // Instrument: rotate steadily and stand still, so a sweep can be read
+        // off the frame dump without touching the keyboard.
+        if std::env::var("PETZ_SWEEP").is_ok() {
+            walker.body.heading += 0.35 * frame_dt;
+        }
+        let sweep = std::env::var("PETZ_SWEEP").is_ok();
+        let moving = if sweep {
+            0.0
+        } else if held.contains(&Keycode::W) {
             1.0
         } else if held.contains(&Keycode::S) {
             -1.0
@@ -968,84 +979,11 @@ fn main() -> Result<(), String> {
             }
         }
 
-        // The eye is the one special ball in this engine. Everything else is a
-        // plain sphere, identical from every angle. The eye is three nested
-        // shells:
-        //
-        //   outer   eyelid - a line splitting brown from transparent (not yet)
-        //   middle  a white sphere that never rotates
-        //   inner   pupil and iris as one texture, sliding inside the sphere
-        //
-        // That is why the original's eyes never popped: the white sphere is
-        // always a full circle, and only the pupil slides across it. We were
-        // rotating geometry when we should have been sliding a texture.
-        let head_geo: Vec<(f32, f32, f32, f32)> = creature
-            .head_balls
-            .iter()
-            .map(|&i| {
-                let p = &doll.particles[i];
-                (screen[i].x, screen[i].y, p.radius.max(1.0), screen[i].depth)
-            })
-            .collect();
-        let head_nearest = head_geo.iter().map(|g| g.3).fold(f32::INFINITY, f32::min);
-        let (pitch_c, pitch_s) = (view.pitch.cos(), view.pitch.sin());
-        // Direction from the eye towards the viewer, in world space.
-        let to_cam = |x: f32, y: f32, z: f32| -pitch_c * y + pitch_s * z;
-        let heading = walker.heading_body;
-        let f = Body { pos: walker.body.pos, heading }.forward();
-
-        // ---- depth order -----------------------------------------------------
-        let mut sort_depth: Vec<f32> = screen.iter().map(|p| p.depth).collect();
-        for &sclera in &creature.eyes {
-            sort_depth[sclera] = head_nearest - 0.01;
-            for &(base, over) in &creature.eye_overlays {
-                if base == sclera {
-                    sort_depth[over] = head_nearest - 0.01;
-                }
-            }
-        }
-        let eye_set: std::collections::HashSet<usize> = creature
-            .eyes
-            .iter()
-            .copied()
-            .chain(creature.eye_overlays.iter().map(|(_, o)| *o))
-            .collect();
-        let mut order: Vec<usize> = (0..doll.particles.len())
-            .filter(|i| !eye_set.contains(i))
-            .collect();
-        order.sort_by(|&a, &b| sort_depth[b].partial_cmp(&sort_depth[a]).unwrap());
-
-        // A ball whose centre lies inside another ball is *inside the body* and
-        // must be hidden where that ball's surface is in front of it. The white
-        // snout is the case in hand: it sits inside the skull, but ordering by
-        // centre depth drew it flat over the head, so in profile the whole ball
-        // was visible.
-        let n_balls = doll.particles.len();
-        let geo_all: Vec<(f32, f32, f32, f32)> = (0..n_balls)
-            .map(|i| {
-                let p = &doll.particles[i];
-                (screen[i].x, screen[i].y, p.radius.max(1.0), screen[i].depth)
-            })
-            .collect();
-        let containers: Vec<Vec<usize>> = (0..n_balls)
-            .map(|i| {
-                let a = &doll.particles[i];
-                (0..n_balls)
-                    .filter(|&j| {
-                        if j == i {
-                            return false;
-                        }
-                        let b = &doll.particles[j];
-                        let (dx, dl, du) = (
-                            a.pos.x - b.pos.x,
-                            a.side - b.side,
-                            b.pos.y - a.pos.y,
-                        );
-                        (dx * dx + dl * dl + du * du).sqrt() < b.radius - 0.5
-                    })
-                    .collect()
-            })
-            .collect();
+        // Every ball goes through one depth-tested rasterizer, in any order.
+        // The sort, the containment lists and the per-eye occlusion closures
+        // are all gone: per-pixel depth answers "what is in front" once, for
+        // every pair of balls, at every angle.
+        depth.clear();
 
         let pattern_for = |colour: u8| {
             let alt = match colour {
@@ -1062,218 +1000,126 @@ fn main() -> Result<(), String> {
             }
         };
 
-        // ---- ordinary balls: rim then body -----------------------------------
-        for &i in &order {
-            if !containers[i].is_empty() {
-                continue; // inside another ball: no rim of its own
+        let eye_set: std::collections::HashSet<usize> = creature
+            .eyes
+            .iter()
+            .copied()
+            .chain(creature.eye_overlays.iter().map(|(_, o)| *o))
+            .collect();
+
+        // ---- ordinary balls --------------------------------------------------
+        for i in 0..doll.particles.len() {
+            if eye_set.contains(&i) {
+                continue;
             }
             let p = &doll.particles[i];
-            if p.no_rim { continue; }
             let r = p.radius.round() as i32;
             if r < 1 { continue; }
             let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
-            let rim = if p.rim == 0 { OUTLINE } else { p.rim };
-            fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), rim);
-        }
-        for &i in &order {
-            let p = &doll.particles[i];
-            let r = p.radius.round() as i32;
-            if r < 1 { continue; }
-            let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
-            let pattern = pattern_for(p.colour);
-            if containers[i].is_empty() {
-                shade_disc_pattern(&mut surface, &table, cx, cy, (r * 2) as usize, light, &pattern);
-            } else {
-                // Clip against whichever containing ball is in front.
-                let inner = containers[i].clone();
-                let geo = geo_all.clone();
-                let (fx0, fy0) = (screen[i].x, screen[i].y);
-                let re = p.radius.max(1.0);
-                let de = screen[i].depth;
-                let clip = move |x: i32, y: i32| -> bool {
-                    let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-                    let d2 = (fx - fx0).powi(2) + (fy - fy0).powi(2);
-                    let surface = de - (re * re - d2).max(0.0).sqrt();
-                    for &j in &inner {
-                        let (hx, hy, hr, hd) = geo[j];
-                        let dj = (fx - hx).powi(2) + (fy - hy).powi(2);
-                        if dj <= hr * hr {
-                            let outer = hd - (hr * hr - dj).max(0.0).sqrt();
-                            if outer < surface {
-                                return false;
-                            }
-                        }
-                    }
-                    true
-                };
-                shade_disc_pattern_masked(&mut surface, &table, cx, cy, (r * 2) as usize, light, &pattern, &clip);
+            let cd = screen[i].depth;
+            if !p.no_rim {
+                let rim = if p.rim == 0 { OUTLINE } else { p.rim };
+                draw_ring(&mut surface, &mut depth, &table, cx, cy,
+                    ((r * 2) + 4) as usize, 2, cd, 1.0, rim, &|_, _| true);
             }
+            let pat = pattern_for(p.colour);
+            draw_disc(&mut surface, &mut depth, &table, cx, cy, (r * 2) as usize, cd, 0.0,
+                Paint::Shaded { light, pattern: &pat }, &|_, _| true);
         }
 
         // ---- eyes: three shells ---------------------------------------------
-        // Both eyes sort after the head, but they must still be ordered between
-        // themselves: sharing one sort key let the far eye be painted over the
-        // near one, which is what "the right eye is underneath the left" was.
-        let mut eyes_sorted = creature.eye_parts.clone();
-        eyes_sorted.sort_by(|a, b| {
-            screen[b.0].depth.partial_cmp(&screen[a.0].depth).unwrap()
-        });
-        for &(sclera, iris, _y, _sign) in &eyes_sorted {
+        let heading = walker.heading_body;
+        let (pc, ps) = (view.pitch.cos(), view.pitch.sin());
+        for &(sclera, iris, _y, _sign) in &creature.eye_parts {
             let sp = &doll.particles[sclera];
             let cp = &doll.particles[creature.skull];
-            // Use this eye's own facing, not the body's. The head lags the body
-            // in a turn, and mixing the two made the pupil slide against a head
-            // that had not caught up yet.
             let eh = walker.facing.get(sclera).copied().unwrap_or(heading);
             let fe = Body { pos: walker.body.pos, heading: eh }.forward();
 
             // Does the white sphere face the viewer? Its normal is the offset
-            // from the head's centre, in world space.
-            let (dx, dl, du) = (
-                sp.pos.x - cp.pos.x,
-                sp.side - cp.side,
-                cp.pos.y - sp.pos.y,
-            );
+            // from the head's centre.
+            let (dx, dl, du) = (sp.pos.x - cp.pos.x, sp.side - cp.side, cp.pos.y - sp.pos.y);
             let n_y = dx * eh.cos() - dl * eh.sin();
-            if to_cam(0.0, n_y, du) <= 0.0 {
-                continue; // eye is round the back of the head
-            }
-
-            // No separate test for the pupil: it slides across the sphere and
-            // the sphere's own edge clips it. Testing "does the pupil face the
-            // viewer" made it pop in exactly at profile.
+            let inner_visible = (-pc * n_y + ps * du) > 0.0;
 
             let (cx, cy) = (screen[sclera].x, screen[sclera].y);
+            let ix = cx.round() as i32;
+            let iy = cy.round() as i32;
             let re = sp.radius.max(1.0);
             let de = screen[sclera].depth;
 
-            // Clip anything drawn for this eye to the outside of the head.
-            let bias = walker.eye_bias;
-            let head_clip = {
-                let geo = head_geo.clone();
-                move |x: i32, y: i32| -> bool {
-                    let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-                    let d2 = (fx - cx).powi(2) + (fy - cy).powi(2);
-                    let eye_surface = de - (re * re - d2).max(0.0).sqrt();
-                    eye_pixel_ok(&geo, fx, fy, eye_surface, bias)
-                }
-            };
+            if inner_visible {
+                // Shell 2: the white sphere, a full circle.
+                let pat = pattern_for(SCLERA);
+                draw_disc(&mut surface, &mut depth, &table, ix, iy, (re as i32 * 2) as usize,
+                    de, 0.0, Paint::Shaded { light, pattern: &pat }, &|_, _| true);
 
-            // Shell 2: the white sphere. A full circle, always.
-            let ix = cx.round() as i32;
-            let iy = cy.round() as i32;
-            fill_disc_masked(&mut surface, &table, ix, iy,
-                (((re as i32 * 2) + 4) as usize).min(255), OUTLINE, &head_clip);
-            let eye_pattern = pattern_for(SCLERA);
-            shade_disc_pattern_masked(&mut surface, &table, ix, iy,
-                (re as i32 * 2) as usize, light, &eye_pattern, &head_clip);
-
-            // Shell 3: pupil and iris, one texture, sliding inside the sphere.
-            // The slide is the projected sideways component of the animal's
-            // facing: centred when it looks at you, at the rim in profile, and
-            // clipped by the sphere's own edge because it is a disc not a plane.
-            let off = re * fe.x;
-            let px = (cx + off).round() as i32;
-            let ip = &doll.particles[iris];
-            let ri = ip.radius.max(1.0);
-            let de_i = de - 0.1;
-            let clip = {
-                let head_clip = head_clip;
-                move |x: i32, y: i32| -> bool {
-                    let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-                    // inside the sclera's circle
-                    if (fx - cx).powi(2) + (fy - cy).powi(2) > re * re {
-                        return false;
+                // Shell 3: pupil and iris, sliding inside the sphere and
+                // clipped by its rim rather than by the head.
+                let off = re * fe.x;
+                let px = (cx + off).round() as i32;
+                let ip = &doll.particles[iris];
+                let ri = ip.radius.max(1.0);
+                let inside = {
+                    let (cx0, cy0, re0) = (cx, cy, re);
+                    move |x: i32, y: i32| -> bool {
+                        let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                        (fx - cx0).powi(2) + (fy - cy0).powi(2) <= re0 * re0
                     }
-                    let _ = de_i;
-                    head_clip(x, y)
-                }
-            };
-            fill_disc_masked(&mut surface, &table, px, iy,
-                (((ri as i32 * 2) + 4) as usize).min(255), IRIS_RING, &clip);
-            let iris_pattern = pattern_for(IRIS);
-            shade_disc_pattern_masked(&mut surface, &table, px, iy,
-                (ri as i32 * 2) as usize, light, &iris_pattern, &clip);
+                };
+                draw_ring(&mut surface, &mut depth, &table, px, iy,
+                    ((ri as i32 * 2) + 4) as usize, 2, de, -1.0, IRIS_RING, &inside);
+                let ipat = pattern_for(IRIS);
+                draw_disc(&mut surface, &mut depth, &table, px, iy, (ri as i32 * 2) as usize,
+                    de, -1.1, Paint::Shaded { light, pattern: &ipat }, &inside);
+            }
 
-        }
-
-        // Shell 1, outermost, and the only one with no cull. The lid is a patch
-        // of coat colour on the outside of the eye, so drawing it when the rest
-        // of the eye has gone is harmless: over the head it is the same colour
-        // as the head and invisible, and where the eye stands against something
-        // else it is exactly the outline that should stay. That is what keeps
-        // the eye from winking out of existence.
-        for &(sclera, iris, _y, _sign) in &creature.eye_parts {
-            let sp = &doll.particles[sclera];
-            let cp = &doll.particles[creature.skull];
-            // Everything except this eye's own two balls can hide the shell, so
-            // its outline stops showing through legs and the far side of the
-            // head. It is no longer drawn unconditionally on top: it is culled
-            // by the facing test no longer, but it is occluded like any ball.
-            let occluders: Vec<(f32, f32, f32, f32)> = (0..doll.particles.len())
-                .filter(|&i| i != sclera && i != iris)
-                .map(|i| {
-                    let p = &doll.particles[i];
-                    (screen[i].x, screen[i].y, p.radius.max(1.0), screen[i].depth)
-                })
-                .collect();
-            // Is the inside of the eye actually there? Same test the sphere
-            // uses: does it face the viewer?
-            let eh = walker.facing.get(sclera).copied().unwrap_or(heading);
-            let (dx, dl, du) = (
-                sp.pos.x - cp.pos.x,
-                sp.side - cp.side,
-                cp.pos.y - sp.pos.y,
-            );
-            let n_y = dx * eh.cos() - dl * eh.sin();
-            let inner_visible = (-pitch_c * n_y + pitch_s * du) > 0.0;
-
-            let (cx, cy) = (screen[sclera].x, screen[sclera].y);
-            let re = sp.radius.max(1.0);
-            let ix = cx.round() as i32;
-            let iy = cy.round() as i32;
+            // Shell 1: the lid. Never culled - it is coat colour, so over the
+            // head it is invisible, and where the eye stands against something
+            // else it is the outline that should persist. When there is no
+            // inside to see, it fills the whole disc and the eye is shut.
             let drop = walker.lid_drop.clamp(0.0, 1.0);
             let tilt = walker.lid_tilt;
             let line = re * (1.0 - 2.0 * drop);
-            // Fill out to the *rim's* radius, not the sphere's. Drawing the
-            // fill at the sphere radius and the rim two pixels outside it left a
-            // ring-shaped gap between them once rounding was accounted for.
             let outer = re + 2.0;
-            let lid_depth = screen[sclera].depth;
-            let lid_clip = move |x: i32, y: i32| -> bool {
+            let lid_keep = move |x: i32, y: i32| -> bool {
                 let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
                 let (ux, uy) = (fx - cx, fy - cy);
-                let d2 = ux * ux + uy * uy;
-                if d2 > outer * outer {
-                    return false;
-                }
-                // Hide the shell behind any ball whose surface is in front of
-                // the eye's at this pixel.
-                if !eye_pixel_ok(&occluders, fx, fy, lid_depth - (outer * outer - d2).max(0.0).sqrt(), 0.0) {
+                if ux * ux + uy * uy > outer * outer {
                     return false;
                 }
                 if !inner_visible {
-                    // Nothing behind the shell to see, so the open half closes:
-                    // a shut eye rather than a hole in the head.
                     return true;
                 }
-                // Screen y grows downwards; the lid covers above the line.
                 uy < -(line + ux * tilt.tan())
             };
-            // The shell's own outline, drawn whether or not the sphere behind
-            // it survived. An eye with no rim reads as a hole; with the rim it
-            // reads as an eye, open or closed. Nothing is painted inside the
-            // open half, so whatever is behind - the sphere, or the head -
-            // shows through.
-            // Fill first, out to the rim's radius, then the rim on top. The two
-            // are then guaranteed to meet.
-            let lid_pattern = pattern_for(BODY);
-            shade_disc_pattern_masked(&mut surface, &table, ix, iy,
-                (((re as i32 * 2) + 4) as usize).min(255), light, &lid_pattern, &lid_clip);
-            // The rim needs the same clip as the fill. Drawn unmasked it was
-            // the one part of the eye that never got occluded.
-            fill_ring_masked(&mut surface, &table, ix, iy,
-                (((re as i32 * 2) + 4) as usize).min(255), 2, OUTLINE, &lid_clip);
+            draw_ring(&mut surface, &mut depth, &table, ix, iy,
+                ((outer as i32 * 2) as usize).min(255), 2, de, -2.0, OUTLINE, &lid_keep);
+            let lpat = pattern_for(BODY);
+            draw_disc(&mut surface, &mut depth, &table, ix, iy,
+                ((outer as i32 * 2) as usize).min(255), de, -2.1,
+                Paint::Shaded { light, pattern: &lpat }, &lid_keep);
+        }
+
+        // Dump our own framebuffer, bypassing the window system entirely. Screen
+        // grabs are unreliable when other windows are about.
+        if std::env::var("PETZ_DUMP_PPM").is_ok() {
+            use std::io::Write;
+            let rgb = palette.to_rgb(&surface);
+            let mut out = format!("P6\n{W} {H}\n255\n").into_bytes();
+            out.extend_from_slice(&rgb);
+            if let Ok(mut f) = std::fs::File::create("/tmp/ours.ppm") {
+                let _ = f.write_all(&out);
+            }
+            let dmin = screen.iter().map(|p| p.depth).fold(f32::INFINITY, f32::min);
+            let dmax = screen.iter().map(|p| p.depth).fold(f32::NEG_INFINITY, f32::max);
+            let nan = screen.iter().filter(|p| !p.depth.is_finite()).count();
+            let xmin = screen.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+            let xmax = screen.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
+            let ymin = screen.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+            let ymax = screen.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+            println!("dump: {} balls, depth {:.0}..{:.0}, screen x {:.0}..{:.0} y {:.0}..{:.0}",
+                doll.particles.len(), dmin, dmax, xmin, xmax, ymin, ymax);
         }
 
         let rgb = palette.to_rgb(&surface);
@@ -1665,6 +1511,7 @@ mod walk_tests {
         assert_eq!(c.eyes.len(), 2, "two eyes");
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
         assert_eq!(c.head.len(), 7, "skull, muzzle, nose and four eye balls");
+        assert_eq!(doll.particles.len(), 31, "total ball count");
     }
 
     #[test]

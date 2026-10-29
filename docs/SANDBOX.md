@@ -106,6 +106,26 @@ is asserted as a regression test.
 - **Feet slide during a turn.** They are driven to body-space targets rather
   than stepping to new plants.
 
+## Depth
+
+Rendering is depth-buffered: every ball is rasterized with its sphere's *surface*
+depth per pixel, tested against a buffer, and drawn. Balls can be drawn in any
+order.
+
+This replaced a painter's sort, and with it a pile of special cases that existed
+only to patch the sort's mistakes: a per-ball sort key, a containment list for
+"which ball is inside which", a head-ball list for the eye's socket, and
+per-eye occlusion closures. Every bug in that area for several sessions was the
+same mistake in different clothes - centre-depth ordering cannot express a ball
+that bulges towards the viewer by its own radius.
+
+The original engine has no z-buffer and paints far-to-near. This is a deliberate
+departure: the goal is "looks and acts like", not bit-exact, and per-pixel depth
+is both more correct and less code.
+
+Cost is a `f32` per pixel - 1.2 MB at 640x480, which is nothing on desktop and
+the reason a watch port would render at half resolution.
+
 ## The eye, and why it was hard
 
 Five separate faults, each of which looked like the same symptom - an eye
