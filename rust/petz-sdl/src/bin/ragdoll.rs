@@ -23,7 +23,7 @@ use std::collections::HashMap;
 
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
-use sdl2::rect::Rect;
+use sdl2::rect::{Point, Rect};
 use std::time::Instant;
 
 use petz_core::fur::{dapple, stripes, Pattern, Texture};
@@ -94,6 +94,10 @@ const EAR_TIP_BACK: f32 = 0.0;
 const EAR_TIP_UP: f32 = 12.0;
 const EAR_TIP_SIZE: f32 = 6.5;
 const EAR_TIP_SINK: f32 = 0.20;
+
+/// How hard each tail link argues for its length, per solver pass. A hard link
+/// is 1.0; the tail is deliberately looser so the chain can stretch and whip.
+const TAIL_LINK: f32 = 0.12;
 
 /// The claw ball's radius. Small enough that four of them across a foot's toe
 /// are separate dots at 320x240 rather than one blob.
@@ -265,9 +269,9 @@ fn build() -> (Ragdoll, Creature) {
     let mut spine = Vec::new();
     for i in 0..spine_r.len() {
         let fwd = 276.0 + i as f32 * spacing;
-        // Ball 2 is white, so the numbering can be read off the back - the
-        // coat's own white (LIGHT), which shades, not the sclera's flat one.
-        let colour = if i == 2 { LIGHT } else { BODY };
+        // Balls 0 and 2 are white, so the numbering can be read off the back -
+        // the coat's own white (LIGHT), which shades, not the sclera's flat one.
+        let colour = if i == 0 || i == 2 { LIGHT } else { BODY };
         spine.push(r.add(Particle::new(fwd, GROUND - 68.0, spine_r[i], colour)));
     }
     // Lift the neck onto the head's own axis. The skull runs from (386, base-26)
@@ -280,15 +284,10 @@ fn build() -> (Ragdoll, Creature) {
     for i in 0..spine.len() - 1 {
         r.link(spine[i], spine[i + 1]);
     }
-    for i in 0..spine.len().saturating_sub(2) {
-        let rest = r.particles[spine[i]].pos.sub(r.particles[spine[i + 2]].pos).length();
-        r.constraints.push(petz_core::Constraint::soft(spine[i], spine[i + 2], rest, 0.7));
-    }
-    {
-        let last = *spine.last().unwrap();
-        let rest = r.particles[spine[0]].pos.sub(r.particles[last].pos).length();
-        r.constraints.push(petz_core::Constraint::soft(spine[0], last, rest, 0.5));
-    }
+    // No diagonals along the spine: measured against a bare chain they bought
+    // 2.4 degrees of fold, because the balls' own contacts do most of the work
+    // of keeping the back straight. One wire between neighbours is the whole
+    // skeleton, which is also what the overlay should show.
 
     // Head, hanging directly off the neck ball: a single skull, with a muzzle
     // and nose on the front of it. The cluster of seven was an experiment in
@@ -307,7 +306,9 @@ fn build() -> (Ragdoll, Creature) {
     r.link(neck, skull);
     r.link(skull, muzzle);
     r.link(muzzle, nose);
-    // A second brace, so the head cannot nod away from the shoulders.
+    // One brace the chain does not provide: the skull to the spine ball two
+    // back. Without it the head nods up to 10 degrees while walking; with it,
+    // 6.3. The spine's own diagonals were removed for the opposite reason.
     r.link(skull, spine[spine.len() - 2]);
 
     let head_balls = vec![skull, muzzle, nose];
@@ -319,24 +320,33 @@ fn build() -> (Ragdoll, Creature) {
     // not run across them. The tip is the lighter ball.
     let mut ear_balls: Vec<(usize, usize, f32)> = Vec::new();
     for side in [-1.0f32, 1.0] {
-        // The base is coat colour: the ear is the tip, and the base exists to
-        // carry it, so a distinct shade there just read as a brown lump.
-        // PETZ_DIAG paints the second ear (balls 9 and 10) in pure blue, to be
-        // read against the red outline main() switches in.
+        // The base takes the snout's blue; PETZ_DIAG paints the second ear
+        // (balls 9 and 10) in pure blue, to be read against the red outline
+        // main() switches in.
         let (base_col, tip_col) = if diag && side > 0.0 {
             (DIAG_EAR, DIAG_EAR)
         } else {
-            (BODY, LIGHT)
+            // The base carries the snout's blue, with the same ramp behind it.
+            (MUZZLE_BLUE, LIGHT)
         };
         let base = r.add(Particle::new(378.0, base_y - 58.0, 10.0, base_col));
         let tip = r.add(Particle::new(368.0, base_y - 72.0, 7.0, tip_col));
-        // Pinned and placed every frame, like everything else on the head that
-        // the pose owns. A spring would only pull the skull about.
+        // Pinned: the pair is placed as a billboard every frame, so a spring
+        // has nothing to do and would only pull the skull about. Pinned plus
+        // linked is also what makes a pulled ear drag the head: the pinned end
+        // takes no correction, so the spring moves the skull instead.
         for i in [base, tip] {
             r.particles[i].pinned = true;
             r.particles[i].side = 10.0 * side;
             r.particles[i].rest_side = 10.0 * side;
         }
+        // The ears are *part of the skeleton*, not decorations floating beside
+        // it: linked to the skull and to each other, so they show up in the
+        // constraint overlay and drag the head when pulled, like every other
+        // ball. The pose keeps each link's rest length at the distance it
+        // actually places them, so the springs never fight the placement.
+        r.link(skull, base);
+        r.link(base, tip);
         ear_balls.push((base, tip, side));
     }
 
@@ -458,17 +468,29 @@ fn build() -> (Ragdoll, Creature) {
     // way a cat's tail leaves the body above the anus. Everything past the root
     // is linked and left to gravity, which is what makes it dangle.
     let mut tail = Vec::new();
+    // The tail keeps far more of its velocity than the body does. Damped like
+    // the body it swings out and snaps back, which reads as stiff; given a
+    // lighter hand it keeps moving, and that is most of what makes a tail look
+    // alive.
+    let tail_drag = 0.998 / 0.985;
     let mut tail_prev = spine[0];
     for i in 0..5 {
-        // Alternating: 43 white, 44 black, 45 white, 46 black, 47 white.
-        let tail_col = if i % 2 == 0 { LIGHT } else { BODY };
+        // Alternating: 43 black, 44 white, 45 black, 46 white, 47 black.
+        let tail_col = if i % 2 == 0 { BODY } else { LIGHT };
         let t = r.add(Particle::new(
             252.0 - i as f32 * 15.0,
             base_y,
             10.0 - i as f32 * 1.2,
             tail_col,
         ));
-        r.link(tail_prev, t);
+        r.particles[t].drag = tail_drag;
+        // Soft links, unlike the spine's: a chain of hard links under gravity
+        // hangs dead straight and reads as a rod. Letting each segment stretch a
+        // little is what gives the tail its whip - it trails behind a turn and
+        // curls instead of pivoting as one piece.
+        let rest = r.particles[tail_prev].pos.sub(r.particles[t].pos).length();
+        r.constraints
+            .push(petz_core::Constraint::soft(tail_prev, t, rest, TAIL_LINK));
         tail_prev = t;
         tail.push(t);
     }
@@ -679,6 +701,10 @@ impl Walker {
                 base_at.y - EAR_TIP_UP * apart,
             );
             for &(base, tip, s) in &creature.ears {
+                // Placed exactly, not driven. Driven, the links below would
+                // fight them and they lagged their own placement by 4 units.
+                // Placed, the pair never drifts apart - and the cost is that a
+                // released ear returns in one frame instead of easing.
                 doll.drag_to(base, base_at);
                 doll.drag_to(tip, tip_at);
                 for i in [base, tip] {
@@ -692,6 +718,17 @@ impl Walker {
                 if let Some(p) = doll.particles.get_mut(tip) {
                     p.radius = EAR_TIP_SIZE;
                 }
+                // The links exist so the ears are part of the skeleton. While
+                // the pose is driving them they must not argue with it, so their
+                // rest lengths track the distance the pose wants; when a grab
+                // suspends the pose, the links are what pull the head along.
+                // The *current* distance, not the target's: a spring acting on
+                // positions that have not converged yet pulls the ear off its
+                // target if it is told the target's length instead.
+                let now = doll.particles[base].pos.sub(doll.particles[creature.skull].pos).length();
+                doll.set_rest(creature.skull, base, now);
+                let now = doll.particles[tip].pos.sub(doll.particles[base].pos).length();
+                doll.set_rest(base, tip, now);
             }
         }
 
@@ -995,6 +1032,11 @@ fn main() -> Result<(), String> {
     let rest = measure(&doll, &creature);
     let mut walker = Walker::new(&creature, doll.particles.len());
     let mut grabbed: Option<usize> = None;
+    // Drawing every constraint, so the skeleton can be read while dragging.
+    let mut show_links = false;
+    // Shift-drag carries the whole animal: where the mouse started, and where
+    // the body was in the world when the drag began.
+    let mut carrying: Option<(Vec2, WVec3)> = None;
     let mut grab_point = Vec2::new(0.0, 0.0);
     let mut grab_home = Vec2::new(0.0, 0.0);
     let mut grab_side = 0.0f32;
@@ -1033,6 +1075,7 @@ fn main() -> Result<(), String> {
          drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
          light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
          (the ear balls are frozen: no keys - see EAR_* in the source)\n\
+         Shift+drag: carry the whole animal   G: constraint links\n\
          Tab: ball numbers   P: settings   R: reset   Space: pause   Esc: quit"
     );
     report(light, steps, tex_idx, textures[tex_idx].0);
@@ -1117,6 +1160,10 @@ fn main() -> Result<(), String> {
                         tex_idx = (tex_idx + 1) % textures.len();
                         report(light, steps, tex_idx, textures[tex_idx].0);
                     }
+                    sdl2::keyboard::Keycode::G => {
+                        show_links = !show_links;
+                        println!("constraint links {}", if show_links { "on" } else { "off" });
+                    }
                     sdl2::keyboard::Keycode::Tab => {
                         show_ids = !show_ids;
                         println!("ball numbers {}", if show_ids { "on" } else { "off" });
@@ -1156,7 +1203,15 @@ fn main() -> Result<(), String> {
                             best = Some((i, d));
                         }
                     }
-                    if let Some((i, _)) = best {
+                    let shift =
+                        held.contains(&Keycode::LShift) || held.contains(&Keycode::RShift);
+                    if shift {
+                        // Carry the whole animal. The pose keeps driving it, so
+                        // it holds its shape; only the body's world position
+                        // moves.
+                        carrying = Some((Vec2::new(mx, my), walker.body.pos));
+                        println!("carrying the animal");
+                    } else if let Some((i, _)) = best {
                         // Grabbing hands the animal to physics: the gait stops
                         // driving it and it goes limp.
                         doll.release_all();
@@ -1171,6 +1226,9 @@ fn main() -> Result<(), String> {
                     }
                 }
                 sdl2::event::Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, .. } => {
+                    if carrying.take().is_some() {
+                        println!("put the animal down");
+                    }
                     if let Some(i) = grabbed.take() {
                         println!("release ball {i}");
                         doll.particles[i].pinned = false;
@@ -1207,7 +1265,18 @@ fn main() -> Result<(), String> {
                     }
                 }
                 sdl2::event::Event::MouseMotion { x, y, .. } => {
-                    if let Some(i) = grabbed {
+                    let carried = carrying;
+                    if let Some((start, home)) = carried {
+                        let mouse = Vec2::new(x as f32 / scale as f32, y as f32 / scale as f32);
+                        // Screen x is world x. Screen y carries height and
+                        // distance together, so a vertical drag moves the animal
+                        // along the ground: `sin(pitch)` is how much of a step
+                        // away shows up as a step up the screen.
+                        let dx = mouse.x - start.x;
+                        let pitch = view.pitch.sin().max(0.2);
+                        let away = -(mouse.y - start.y) / pitch;
+                        walker.body.pos = WVec3::new(home.x + dx, home.y + away, home.z);
+                    } else if let Some(i) = grabbed {
                         // Drag by *delta*, never by absolute position. An
                         // absolute unprojection depends on a depth that goes
                         // stale, and a wrong depth throws the ball hundreds of
@@ -1268,10 +1337,7 @@ fn main() -> Result<(), String> {
                 walker.moving = 0.0;
             }
         }
-        let sweep = std::env::var("PETZ_SWEEP").is_ok();
-        let moving = if sweep {
-            0.0
-        } else if held.contains(&Keycode::W) {
+        let moving = if held.contains(&Keycode::W) {
             1.0
         } else if held.contains(&Keycode::S) {
             -1.0
@@ -1413,6 +1479,9 @@ fn main() -> Result<(), String> {
                 // the rim win across the whole ball - which is exactly what
                 // happened: the dog came out entirely in outline colour.
                 let rim = if p.rim == 0 { outline } else { p.rim };
+                // Outline weight: the body's diameter plus four, so the
+                // annulus that survives is two pixels all the way round. An odd
+                // offset makes it one pixel on some edges and two on others.
                 draw_flat_disc(&mut surface, &mut depth, &table, cx, cy,
                     ((r * 2) + 4) as usize, cd + 0.5, rim, &|_, _| true);
             }
@@ -1555,6 +1624,22 @@ fn main() -> Result<(), String> {
                     continue;
                 }
                 draw_number(&mut canvas, x, y, 2, i as i32);
+            }
+        }
+
+        // The skeleton: every spring drawn between the balls it joins, so what
+        // is connected to what can be seen while dragging one. Soft constraints
+        // are drawn dashed-short by drawing them dimmer.
+        if show_links {
+            canvas.set_draw_color(Color::RGB(0, 255, 255));
+            for c in &doll.constraints {
+                let a = screen.get(c.a);
+                let b = screen.get(c.b);
+                if let (Some(a), Some(b)) = (a, b) {
+                    let p1 = Point::new((a.x * scale as f32) as i32, (a.y * scale as f32) as i32);
+                    let p2 = Point::new((b.x * scale as f32) as i32, (b.y * scale as f32) as i32);
+                    let _ = canvas.draw_line(p1, p2);
+                }
             }
         }
 
@@ -1941,8 +2026,8 @@ mod walk_tests {
             "pupils"
         );
         assert!(
-            c.ears.iter().all(|&(base, _, _)| doll.particles[base].colour == BODY),
-            "ear bases are coat colour, not a shade"
+            c.ears.iter().all(|&(base, _, _)| doll.particles[base].colour == MUZZLE_BLUE),
+            "ear bases carry the snout's blue"
         );
         assert_eq!(c.eyes.len(), 2, "two eyes");
         assert_eq!(c.ears.len(), 2, "two ears, each base plus tip");
@@ -2220,6 +2305,39 @@ mod walk_tests {
 
 
 
+
+    #[test]
+    fn pulling_an_ear_drags_the_head() {
+        // The ears are pinned to the skull, so they hold their placement exactly
+        // - but they are *linked* to it as well, which only shows when something
+        // pulls them: a pinned end takes no correction, so the spring moves the
+        // skull instead. Before the links existed an ear could be dragged
+        // clean off the model and nothing followed it.
+        let (mut doll, c, rest, mut w) = rig();
+        for _ in 0..90 {
+            w.pose(&mut doll, &c, &rest);
+            doll.step(1.0 / 120.0);
+        }
+        let skull0 = doll.particles[c.skull].pos;
+        let base = c.ears[0].0;
+        let from = doll.particles[base].pos;
+        // A grab suspends the drives; do the same here.
+        doll.release_all();
+        for _ in 0..30 {
+            doll.drag_to(base, from.add(Vec2::new(-25.0, 0.0)));
+            doll.step(1.0 / 120.0);
+        }
+        let moved = doll.particles[c.skull].pos.sub(skull0).length();
+        assert!(moved > 3.0, "the head did not follow the ear: {moved:.2}");
+        // And the link is in the constraint list, so the overlay shows it.
+        let linked = doll
+            .constraints
+            .iter()
+            .any(|k| (k.a == c.skull && k.b == base) || (k.a == base && k.b == c.skull));
+        assert!(linked, "the ear is not linked to the skull");
+    }
+
+
     #[test]
     fn nearer_balls_are_drawn_last() {
         // Painter's order, keyed on depth: the far side of the body must be
@@ -2320,10 +2438,15 @@ mod walk_tests {
         // Settled shape, after several attempts: one held ball and a free chain.
         // The root sits high on the rump, above the line of the spine, the way a
         // cat's tail leaves the body; every ball past it carries no target, so
-        // the chain dangles and can swing right round the root. Two failures
-        // this guards: a driven chain (a rigid rod) and a slack root (the tail
-        // drops under the cat).
-        let (doll, c, _) = run(1.0);
+        // the chain dangles and can swing right round the root. Guards, in order
+        // of how many times each one bit: a driven chain (a rigid rod), a slack
+        // root (the tail drops under the cat), and a chain damped like the body,
+        // which swings out and snaps back and reads as stiff.
+        let (mut doll, c, rest, mut w) = rig();
+        for _ in 0..90 {
+            w.pose(&mut doll, &c, &rest);
+            doll.step(1.0 / 120.0);
+        }
         let root = c.tail[0];
         assert!(doll.particles[root].follow > 0.0, "the tail root lost its drive");
         assert!(
@@ -2346,12 +2469,38 @@ mod walk_tests {
             "the tail root is not above the body axis"
         );
         assert!(root_pos.x < rear.x, "the tail root is not behind the rump");
-        // The free chain hangs below the root rather than standing out of it.
         assert!(
             tip.y > root_pos.y + 30.0,
             "the chain does not hang: root {:.0}, tip {:.0}",
             root_pos.y,
             tip.y
+        );
+        // It keeps moving after the turn stops. Damped like the body it snapped
+        // back and died within a quarter second.
+        let angle = |doll: &Ragdoll| {
+            let tip = doll.particles[*c.tail.last().unwrap()].pos;
+            let d = tip.sub(doll.particles[c.tail[0]].pos);
+            d.x.atan2(d.y)
+        };
+        for _ in 0..120 {
+            w.advance(1.0 / 120.0, 0.0, 1.0);
+            w.pose(&mut doll, &c, &rest);
+            doll.step(1.0 / 120.0);
+        }
+        let mut last = angle(&doll);
+        let mut travel = 0.0f32;
+        for _ in 0..180 {
+            w.advance(1.0 / 120.0, 0.0, 0.0);
+            w.pose(&mut doll, &c, &rest);
+            doll.step(1.0 / 120.0);
+            let a = angle(&doll);
+            travel += (a - last).abs();
+            last = a;
+        }
+        assert!(
+            travel.to_degrees() > 20.0,
+            "the tail stops dead once the turn ends: {:.1} degrees in 1.5 s",
+            travel.to_degrees()
         );
     }
 }

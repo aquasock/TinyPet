@@ -80,6 +80,10 @@ pub struct Particle {
     /// Draw no rim at all. The nose is black against black, where an outline
     /// in the body's rim colour reads as a brown ring around it.
     pub no_rim: bool,
+    /// Multiplier on the world's damping, per ball. 1.0 is the body's own
+    /// damped behaviour; above 1 keeps more of the previous step's velocity, so
+    /// a chain can stay lively while the body does not go wobbly.
+    pub drag: f32,
     /// Colour of the rim drawn around this ball. The retail data carries a
     /// per-ball outline colour, and the eye uses it for the iris ring.
     pub rim: u8,
@@ -103,6 +107,7 @@ impl Particle {
             rest_side: 0.0,
             z_bias: 0.0,
             no_rim: false,
+            drag: 1.0,
             rim: 0,
             layer: 0,
         }
@@ -189,8 +194,9 @@ impl Ragdoll {
             if p.pinned {
                 continue;
             }
-            let vx = (p.pos.x - p.prev.x) * self.damping;
-            let vy = (p.pos.y - p.prev.y) * self.damping;
+            let keep = self.damping * p.drag;
+            let vx = (p.pos.x - p.prev.x) * keep;
+            let vy = (p.pos.y - p.prev.y) * keep;
             p.prev = p.pos;
             p.pos.x += vx;
             p.pos.y += vy + self.gravity * dt2;

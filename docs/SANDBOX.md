@@ -43,7 +43,9 @@ full size it filled half the width of a 320x240 window and left no room to walk.
 animal's, so both can be changed without a rebuild. `PETZ_WINDOW=x,y` places the
 window at creation.
 
-Keys: drag to grab, **`W`/`S` forward and back**, **`A`/`D` turn left and right**
+Keys: drag to grab a ball (the animal goes limp), **Shift+drag to carry the
+whole animal** (it holds its shape and only its world position moves), `G` to
+draw every constraint as a line, **`W`/`S` forward and back**, **`A`/`D` turn left and right**
 (hold, not toggle; `Q`/`E` are the same), `+`/`-` speed, `V` view pitch, arrows
 move the light, `Z`/`X` ambience, `[`/`]` ramp steps, `T` texture, `,`/`.` spine
 flex, `Tab` ball numbers, `P` print settings, `R` reset, `Space` pause, `Esc`
@@ -128,9 +130,23 @@ is asserted as a regression test.
   to give the eye a socket and was removed once the shell model made it
   unnecessary: the eye is now a fixed disc whose contents come and go, so it no
   longer depends on the head being made of several balls.
+- **The spine is a plain chain, with one brace for the head.** It used to carry
+  diagonals (0-2, 1-3, 0-3) as pseudo-angular stiffness. Measured against a bare
+  chain they bought 2.4 degrees of fold, because the balls' own contacts do most
+  of the work of keeping the back straight - so they are gone, and the overlay
+  shows one wire between neighbours. The skull-to-spine[2] brace stays: it does
+  something measurable, holding the head's nod to 6.3 degrees rather than 10.
 - **Physics is sagittal-only.** The solver runs in the animal's own plane;
   lateral offsets are authored, not simulated. A turning dog's tail swings
   fore-and-aft, not across the screen.
+- **The tail is loose on purpose.** Two settings make it read as a chain rather
+  than a rod: the links are soft (`TAIL_LINK = 0.12` per pass, so a segment can
+  give under load) and the tail balls carry a `drag` multiplier that leaves them
+  at 0.998 velocity retention against the body's 0.985. That second one is what
+  gives it life - damped like the body it swings out and snaps back in a quarter
+  of a second; with a lighter hand it carries on swinging, which is the whole
+  difference between a tail and a stick. Measured through a turn and a stop: 75
+  degrees of travel after the turn ends against 20 for the body's damping.
 - **The tail is one held ball and a free chain.** The root sits high on the
   rump, above the line of the spine - a cat's tail leaves the body above the
   anus, which is level - and is driven there at `follow = 0.25`. Every ball past
