@@ -9,6 +9,10 @@ use std::path::PathBuf;
 
 use petz_core::{fill_disc, Lnz, Palette, SpanTable, Surface};
 
+/// Backdrop for single-frame renders: the same grass green the SDL player uses,
+/// so a headless frame and a played frame can be compared directly.
+const BACKGROUND: u8 = 130;
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
