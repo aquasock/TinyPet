@@ -195,38 +195,21 @@ fn build() -> (Ragdoll, Creature) {
         r.constraints.push(petz_core::Constraint::soft(spine[0], last, rest, 0.5));
     }
 
-    // Head, hanging directly off the neck ball, built as a cluster rather than
-    // one oversized sphere. A single 26-pixel ball meant the eye was either
-    // fully in front of it or fully behind it, which is why it clipped on and
-    // off violently. A smaller cranium with cheeks, brow and muzzle around it
-    // gives the eye a socket: it is occluded by whichever ball is actually in
-    // front of it, and the transition happens gradually.
+    // Head, hanging directly off the neck ball: a single skull, with a muzzle
+    // and nose on the front of it. The cluster of seven was an experiment in
+    // making the eye clip against a socket; the shell model made it unnecessary.
     let base_y = GROUND - 68.0;
     let neck = *spine.last().unwrap();
-    let cranium = r.add(Particle::new(384.0, base_y - 28.0, 18.0, BODY));
-    let brow = r.add(Particle::new(392.0, base_y - 36.0, 11.0, BODY));
-    let cheek_a = r.add(Particle::new(384.0, base_y - 18.0, 11.0, BODY));
-    let cheek_b = r.add(Particle::new(384.0, base_y - 18.0, 11.0, BODY));
-    let jowl = r.add(Particle::new(398.0, base_y - 14.0, 10.0, LIGHT));
-    let muzzle = r.add(Particle::new(408.0, base_y - 16.0, 11.0, LIGHT));
-    let nose = r.add(Particle::new(416.0, base_y - 20.0, 5.0, DARK));
-    r.particles[cheek_a].side = -10.0;
-    r.particles[cheek_a].rest_side = -10.0;
-    r.particles[cheek_b].side = 10.0;
-    r.particles[cheek_b].rest_side = 10.0;
-
-    r.link(neck, cranium);
-    r.link(cranium, brow);
-    r.link(cranium, cheek_a);
-    r.link(cranium, cheek_b);
-    r.link(cranium, jowl);
-    r.link(jowl, muzzle);
+    let skull = r.add(Particle::new(386.0, base_y - 26.0, 26.0, BODY));
+    let muzzle = r.add(Particle::new(406.0, base_y - 16.0, 13.0, LIGHT));
+    let nose = r.add(Particle::new(416.0, base_y - 21.0, 5.0, DARK));
+    r.link(neck, skull);
+    r.link(skull, muzzle);
     r.link(muzzle, nose);
     // A second brace, so the head cannot nod away from the shoulders.
-    r.link(cranium, spine[spine.len() - 2]);
+    r.link(skull, spine[spine.len() - 2]);
 
-    let skull = cranium;
-    let head_balls = vec![cranium, brow, cheek_a, cheek_b, jowl, muzzle, nose];
+    let head_balls = vec![skull, muzzle, nose];
 
     // Eyes. The retail data is two balls per eye: a white sclera and a black
     // pupil whose *outline* is the iris, in a per-breed colour. There is no
@@ -294,7 +277,7 @@ fn build() -> (Ragdoll, Creature) {
         tail.push(t);
     }
 
-    let mut head = vec![cranium, brow, cheek_a, cheek_b, jowl, muzzle, nose];
+    let mut head = vec![skull, muzzle, nose];
     head.extend(eyes);
     (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eyes: eye_list, eye_parts, head_balls })
 }
@@ -373,7 +356,7 @@ impl Walker {
             // The placement tuned by eye, expressed on the sphere: 27 degrees
             // round from straight ahead, at radius 31 against a head of 26.
             eye_angle: 27.0_f32.to_radians(),
-            eye_radius: 22.0,
+            eye_radius: 31.0,
             eye_bias: 1.5,
             lid_drop: 0.26,
             lid_tilt: 0.14,
@@ -1479,7 +1462,7 @@ mod walk_tests {
     }
 
     fn visible_eyes(heading: f32) -> Vec<bool> {
-        visible_eyes_at(heading, 22.0)
+        visible_eyes_at(heading, 31.0)
     }
 
     /// Does this eye face the viewer? On the sphere the eye sits at

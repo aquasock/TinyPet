@@ -96,12 +96,10 @@ is asserted as a regression test.
 - **Eyelids are removed.** Petz has no lid geometry — it parameterises one with
   `[Eyelid Color]` plus per-eye "eyelid height" and "eyelid tilt". Our lid-ball
   approximation was visible above the eye and read as a small ear.
-- **The head is a cluster now, and the eye clips against all of it.** Seven
-  balls — cranium, brow, two cheeks, jowl, muzzle, nose — so the eye is occluded
-  by whichever ball is actually in front of it rather than by one oversized
-  sphere. It still clips a little eagerly at some placements, which is what the
-  depth bias (`U`/`I`) is for; that bias is a deliberate fudge, not a more
-  correct occluder.
+- **The head is a single ball again.** A seven-ball cluster was tried as a way
+  to give the eye a socket and was removed once the shell model made it
+  unnecessary: the eye is now a fixed disc whose contents come and go, so it no
+  longer depends on the head being made of several balls.
 - **Physics is sagittal-only.** The solver runs in the animal's own plane;
   lateral offsets are authored, not simulated. A turning dog's tail swings
   fore-and-aft, not across the screen.
