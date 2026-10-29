@@ -66,6 +66,10 @@ pub struct Particle {
     pub target: Option<Vec2>,
     /// How hard to chase `target`, 0..=1 per step.
     pub follow: f32,
+    /// Lateral offset from the body's midline, in body units. The solver works
+    /// in the animal's sagittal plane, so this is authored rather than
+    /// simulated: it is what puts a left leg to the left of a right one.
+    pub side: f32,
 }
 
 impl Particle {
@@ -78,6 +82,7 @@ impl Particle {
             pinned: false,
             target: None,
             follow: 0.0,
+            side: 0.0,
         }
     }
 

@@ -25,6 +25,7 @@ use std::time::Instant;
 use petz_core::fur::{dapple, shade_disc_pattern, stripes, Pattern, Texture};
 use petz_core::gait::{two_bone_ik, Gait, GaitSpec};
 use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
+use petz_core::project::{Body, Projected, Vec3 as WVec3, View};
 use petz_core::shade::{Light, Ramp, Vec3};
 use petz_core::{fill_disc, Palette, SpanTable, Surface};
 use std::fs;
@@ -42,8 +43,10 @@ const DARK: u8 = 0;
 /// Where the floor is. Feet stand on this line.
 const GROUND: f32 = 218.0;
 
-/// Rest-pose centre of the body in world x; the camera keeps this centred.
-const BODY_CENTRE: f32 = 366.0;
+/// Centre of the body in the skeleton's own forward coordinates. The bones are
+/// authored at absolute x, so this is subtracted before placing them in the
+/// world - otherwise the animal stands a body-length behind its own position.
+const BODY_ORIGIN: f32 = 366.0;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -86,20 +89,20 @@ struct Creature {
 
 fn build() -> (Ragdoll, Creature) {
     let mut r = Ragdoll::new();
-    r.bounds = Some((-2000.0, 8.0, 1_000_000.0, 460.0));
+    r.bounds = Some((-4000.0, 8.0, 4000.0, 460.0));
     r.gravity = 1400.0;
     r.damping = 0.985;
     r.iterations = 16;
     r.contact = 0.35;
 
-    // Radii are ~70% of bone length so neighbours overlap and the silhouette
-    // closes up into one mass rather than a row of beads.
+    // Everything below is in *body* coordinates: x is forward, y is down from
+    // the body's own frame (so `GROUND` is the floor), and `side` is lateral.
     let spacing = 26.0;
     let spine_r = [24.0, 23.0, 22.0, 21.0, 20.0];
     let mut spine = Vec::new();
     for i in 0..spine_r.len() {
-        let x = 276.0 + i as f32 * spacing;
-        spine.push(r.add(Particle::new(x, GROUND - 68.0, spine_r[i], BODY)));
+        let fwd = 276.0 + i as f32 * spacing;
+        spine.push(r.add(Particle::new(fwd, GROUND - 68.0, spine_r[i], BODY)));
     }
     for i in 0..spine.len() - 1 {
         r.link(spine[i], spine[i + 1]);
@@ -113,7 +116,6 @@ fn build() -> (Ragdoll, Creature) {
         r.constraints.push(petz_core::Constraint::soft(spine[0], spine[4], rest, 0.5));
     }
 
-    // Head.
     let base_y = GROUND - 68.0;
     let last = *spine.last().unwrap();
     let neck = r.add(Particle::new(408.0, base_y - 12.0, 17.0, BODY));
@@ -132,23 +134,26 @@ fn build() -> (Ragdoll, Creature) {
     r.link(skull, ear_a);
     r.link(skull, ear_b);
 
-    // Legs: hip under the spine, knee, paw on the ground. Front legs bend one
-    // way, hind legs the other, as a dog's do.
-    let legs_spec: [(usize, f32, f32); 4] = [
-        (1, 286.0, 1.0),  // left front
-        (2, 312.0, 1.0),  // right front
-        (3, 388.0, -1.0), // left hind
-        (2, 414.0, -1.0), // right hind
+    // Legs. A pair shares its forward position and differs only in `side` -
+    // which is exactly what a side view cannot show and a body transform can.
+    let legs_spec: [(f32, f32, f32); 4] = [
+        (300.0, 9.0, 1.0),   // left front
+        (300.0, -9.0, 1.0),  // right front
+        (372.0, 9.0, -1.0),  // left hind
+        (372.0, -9.0, -1.0), // right hind
     ];
     let mut legs = Vec::new();
-    for (spine_idx, x, bend) in legs_spec {
-        let hip = r.add(Particle::new(x, GROUND - 48.0, 15.0, BODY));
-        let knee = r.add(Particle::new(x, GROUND - 22.0, 12.0, BODY));
-        let foot = r.add(Particle::new(x, GROUND, 10.0, LIGHT));
-        r.link(spine[spine_idx], hip);
+    for (fwd, side, bend) in legs_spec {
+        let hip = r.add(Particle::new(fwd, GROUND - 48.0, 15.0, BODY));
+        let knee = r.add(Particle::new(fwd, GROUND - 22.0, 12.0, BODY));
+        let foot = r.add(Particle::new(fwd, GROUND, 10.0, LIGHT));
+        for i in [hip, knee, foot] {
+            r.particles[i].side = side;
+        }
+        r.link(spine[if fwd < 350.0 { 1 } else { 3 }], hip);
         r.link(hip, knee);
         r.link(knee, foot);
-        legs.push(Leg { hip, knee, foot, bend, rest: Vec2::new(x, GROUND) });
+        legs.push(Leg { hip, knee, foot, bend, rest: Vec2::new(fwd, GROUND) });
     }
 
     // Tail: no target, so it swings with the body.
@@ -159,6 +164,10 @@ fn build() -> (Ragdoll, Creature) {
         tail_prev = t;
     }
 
+    // Ears sit either side of the skull.
+    r.particles[ear_a].side = -6.0;
+    r.particles[ear_b].side = 6.0;
+
     let head = vec![neck, skull, muzzle, nose, ear_a, ear_b];
     (r, Creature { spine, legs, head })
 }
@@ -166,14 +175,19 @@ fn build() -> (Ragdoll, Creature) {
 /// The walking controller: owns the clock, the world position, and the pose.
 struct Walker {
     gait: Gait,
-    /// How far the animal has travelled.
-    origin_x: f32,
+    /// Where the animal is in the world and which way it faces.
+    body: Body,
     walking: bool,
 }
 
 impl Walker {
     fn new() -> Self {
-        Self { gait: Gait::walk(GaitSpec::default()), origin_x: 0.0, walking: true }
+        Self {
+            gait: Gait::walk(GaitSpec::default()),
+            // Start near the viewer, walking away from it: straight up the screen.
+            body: Body { pos: WVec3::new(320.0, -520.0, 0.0), heading: 0.42 },
+            walking: true,
+        }
     }
 
     fn advance(&mut self, dt: f32) {
@@ -181,7 +195,9 @@ impl Walker {
             return;
         }
         self.gait.advance(dt);
-        self.origin_x += self.gait.spec.speed * dt;
+        let f = self.body.forward();
+        self.body.pos.x += f.x * self.gait.spec.speed * dt;
+        self.body.pos.y += f.y * self.gait.spec.speed * dt;
     }
 
     /// Drive the skeleton toward the pose the gait describes.
@@ -192,26 +208,21 @@ impl Walker {
         let lift = if self.walking { bob } else { 0.0 };
 
         for (i, &p) in creature.spine.iter().enumerate() {
-            let target = Vec2::new(rest.spine[i].x + self.origin_x, rest.spine[i].y + lift);
-            doll.drive_to(p, target, 0.45);
+            doll.drive_to(p, Vec2::new(rest.spine[i].x, rest.spine[i].y + lift), 0.45);
         }
         for (i, &p) in creature.head.iter().enumerate() {
-            let target = Vec2::new(rest.head[i].x + self.origin_x, rest.head[i].y + lift);
-            doll.drive_to(p, target, 0.4);
+            doll.drive_to(p, Vec2::new(rest.head[i].x, rest.head[i].y + lift), 0.4);
         }
 
         for (i, leg) in creature.legs.iter().enumerate() {
             let foot = if self.walking {
                 let f = self.gait.foot(i);
-                Vec2::new(leg.rest.x + self.origin_x + f.dx, GROUND + f.dy)
+                Vec2::new(leg.rest.x + f.dx, GROUND + f.dy)
             } else {
-                Vec2::new(leg.rest.x + self.origin_x, GROUND)
+                Vec2::new(leg.rest.x, GROUND)
             };
 
-            let hip_target = Vec2::new(
-                rest.legs[i].x + self.origin_x,
-                rest.legs[i].y + lift,
-            );
+            let hip_target = Vec2::new(rest.legs[i].x, rest.legs[i].y + lift);
             // Bone lengths are the rest distances, so IK matches the skeleton.
             let upper = rest.hip_to_knee[i];
             let lower = rest.knee_to_foot[i];
@@ -318,6 +329,10 @@ fn main() -> Result<(), String> {
     let rest = measure(&doll, &creature);
     let mut walker = Walker::new();
     let mut grabbed: Option<usize> = None;
+    let mut grab_point = Vec2::new(0.0, 0.0);
+    let mut view = View::new(25.0, GROUND);
+    // Projected positions from the last frame; the picker works in screen space.
+    let mut screen: Vec<Projected> = Vec::new();
 
     let mut events = sdl.event_pump()?;
     let mut paused = false;
@@ -326,8 +341,9 @@ fn main() -> Result<(), String> {
     let mut last = Instant::now();
 
     println!(
-        "drag: left mouse   W: walk/stop   +/-: speed   light: arrows   ambience: A/S\n\
-         steps: [ ]   texture: T   P: print settings   R: reset   Space: pause   Esc: quit"
+        "drag: left mouse   W: walk/stop   +/-: speed   Q/E: turn   V: view pitch\n\
+         light: arrows   ambience: A/S   steps: [ ]   texture: T   P: settings\n\
+         R: reset   Space: pause   Esc: quit"
     );
     report(light, steps, tex_idx, textures[tex_idx].0);
 
@@ -345,6 +361,21 @@ fn main() -> Result<(), String> {
                     }
                     sdl2::keyboard::Keycode::Space => paused = !paused,
                     sdl2::keyboard::Keycode::W => walker.walking = !walker.walking,
+                    sdl2::keyboard::Keycode::Q => {
+                        walker.body.heading -= 0.26;
+                        println!("heading {:.0} deg", walker.body.heading.to_degrees());
+                    }
+                    sdl2::keyboard::Keycode::E => {
+                        walker.body.heading += 0.26;
+                        println!("heading {:.0} deg", walker.body.heading.to_degrees());
+                    }
+                    sdl2::keyboard::Keycode::V => {
+                        let degrees = [0.0f32, 15.0, 25.0, 35.0];
+                        let now = view.pitch.to_degrees();
+                        let next = degrees.iter().find(|d| **d > now + 0.5).copied().unwrap_or(0.0);
+                        view.pitch = next.to_radians();
+                        println!("view pitch {next:.0} deg");
+                    }
                     sdl2::keyboard::Keycode::Equals | sdl2::keyboard::Keycode::Plus => {
                         walker.gait.spec.speed += 15.0;
                         println!("speed {:.0} px/s", walker.gait.spec.speed);
@@ -397,32 +428,52 @@ fn main() -> Result<(), String> {
                 sdl2::event::Event::MouseButtonDown {
                     x, y, mouse_btn: sdl2::mouse::MouseButton::Left, ..
                 } => {
-                    let cam = walker.origin_x + BODY_CENTRE - W as f32 / 2.0;
-                    let p = Vec2::new(x as f32 / scale as f32 + cam, y as f32 / scale as f32);
-                    if let Some(i) = doll.nearest(p, 26.0) {
+                    // Pick in screen space: with a projection there is no single
+                    // world point under the cursor.
+                    let (mx, my) = (x as f32 / scale as f32, y as f32 / scale as f32);
+                    let mut best: Option<(usize, f32)> = None;
+                    for (i, p) in screen.iter().enumerate() {
+                        let d = ((p.x - mx).powi(2) + (p.y - my).powi(2)).sqrt();
+                        if d < 30.0 && best.map_or(true, |(_, bd)| d < bd) {
+                            best = Some((i, d));
+                        }
+                    }
+                    if let Some((i, _)) = best {
                         // Grabbing hands the animal to physics: the gait stops
                         // driving it and it goes limp.
                         doll.release_all();
                         doll.particles[i].pinned = true;
-                        doll.drag_to(i, p);
+                        grab_point = Vec2::new(mx, my);
                         grabbed = Some(i);
                     }
                 }
                 sdl2::event::Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, .. } => {
                     if let Some(i) = grabbed.take() {
                         doll.particles[i].pinned = false;
-                        // Let the body fall where it is and walk on from there.
-                        walker.origin_x = doll.particles[creature.spine[2]].pos.x
-                            - rest.spine[2].x;
                     }
                 }
                 sdl2::event::Event::MouseMotion { x, y, .. } => {
                     if let Some(i) = grabbed {
-                        let cam = walker.origin_x + BODY_CENTRE - W as f32 / 2.0;
-                        doll.drag_to(
-                            i,
-                            Vec2::new(x as f32 / scale as f32 + cam, y as f32 / scale as f32),
+                        let mouse = Vec2::new(x as f32 / scale as f32, y as f32 / scale as f32);
+                        let depth = screen.get(i).map(|p| p.depth).unwrap_or(0.0);
+                        let (wy, wz) = view.unproject(mouse.y, depth);
+                        let world = WVec3::new(walker.body.pos.x + mouse.x - grab_point.x, wy, wz);
+                        // Back into body coordinates: project onto the body's
+                        // forward and right axes.
+                        let d = WVec3::new(
+                            world.x - walker.body.pos.x,
+                            world.y - walker.body.pos.y,
+                            0.0,
                         );
+                        let f = walker.body.forward();
+                        let r = walker.body.right();
+                        let fwd = d.x * f.x + d.y * f.y;
+                        let lat = d.x * r.x + d.y * r.y;
+                        if let Some(p) = doll.particles.get_mut(i) {
+                            p.pos = Vec2::new(fwd, GROUND - (world.z - walker.body.pos.z));
+                            p.prev = p.pos;
+                            p.side = lat;
+                        }
                     }
                 }
                 _ => {}
@@ -441,9 +492,25 @@ fn main() -> Result<(), String> {
                 doll.step(step as f32);
                 acc -= step;
             }
+            // Keep the animal in the visible patch of ground. It can leave in
+            // any direction once it turns, so wrap both axes.
+            let p = &mut walker.body.pos;
+            if p.y > 140.0 { p.y = -520.0; }
+            if p.y < -560.0 { p.y = 100.0; }
+            if p.x > 760.0 { p.x = -120.0; }
+            if p.x < -160.0 { p.x = 720.0; }
         }
 
-        let cam = walker.origin_x + BODY_CENTRE - W as f32 / 2.0;
+        // Place every ball in the world and project it. The z we get back is
+        // the draw order: there is no z-buffer, only a painter.
+        screen.clear();
+        for p in &doll.particles {
+            let world = walker
+                .body
+                .to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y);
+            screen.push(view.project(world));
+        }
+
         let mut surface = Surface::new(W, H);
         for y in 0..H {
             for x in 0..W {
@@ -453,7 +520,7 @@ fn main() -> Result<(), String> {
 
         let mut order: Vec<usize> = (0..doll.particles.len()).collect();
         order.sort_by(|&a, &b| {
-            doll.particles[a].pos.y.partial_cmp(&doll.particles[b].pos.y).unwrap()
+            screen[b].depth.partial_cmp(&screen[a].depth).unwrap()
         });
 
         // Rim over the whole body, then shaded bodies, so overlaps do not leave
@@ -462,14 +529,14 @@ fn main() -> Result<(), String> {
             let p = &doll.particles[i];
             let r = p.radius.round() as i32;
             if r < 1 { continue; }
-            let (cx, cy) = ((p.pos.x - cam).round() as i32, p.pos.y.round() as i32);
+            let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
             fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), OUTLINE);
         }
         for &i in &order {
             let p = &doll.particles[i];
             let r = p.radius.round() as i32;
             if r < 1 { continue; }
-            let (cx, cy) = ((p.pos.x - cam).round() as i32, p.pos.y.round() as i32);
+            let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
             let alt = match p.colour {
                 BODY => LIGHT,
                 LIGHT => BODY,
@@ -519,12 +586,63 @@ mod walk_tests {
 
     #[test]
     fn walking_moves_the_animal_at_the_gait_speed() {
+        let start = Walker::new().body.pos;
         let (_, _, w) = run(2.0);
+        let travelled = w.body.pos.sub(start).length();
         let expected = w.gait.spec.speed * 2.0;
         assert!(
-            (w.origin_x - expected).abs() < 1.0,
-            "travelled {} px, expected {expected}",
-            w.origin_x
+            (travelled - expected).abs() < 1.0,
+            "travelled {travelled} px, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn walking_away_takes_the_animal_up_the_screen() {
+        let view = View::new(25.0, GROUND);
+        let (doll, c, w) = run(2.0);
+        let midpoint = |d: &Ragdoll| {
+            let p = &d.particles[c.spine[2]];
+            view.project(w.body.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y))
+        };
+        let now = midpoint(&doll);
+        let start = View::new(25.0, GROUND).project(
+            Walker::new().body.to_world(
+                doll.particles[c.spine[2]].pos.x - BODY_ORIGIN,
+                doll.particles[c.spine[2]].side,
+                GROUND - doll.particles[c.spine[2]].pos.y,
+            ),
+        );
+        assert!(
+            now.y < start.y - 10.0,
+            "walking away did not move up the screen: {:.1} -> {:.1}",
+            start.y,
+            now.y
+        );
+        let _ = w;
+    }
+
+    #[test]
+    fn nearer_balls_are_drawn_last() {
+        // Painter's order, keyed on depth: the far side of the body must be
+        // drawn before the near side, or a dog walking away shows its chest
+        // through its back.
+        let (doll, c, w) = run(1.0);
+        let view = View::new(25.0, GROUND);
+        let depths: Vec<f32> = c
+            .legs
+            .iter()
+            .map(|l| {
+                let p = &doll.particles[l.foot];
+                view.project(w.body.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y)).depth
+            })
+            .collect();
+        let mut order: Vec<usize> = (0..4).collect();
+        order.sort_by(|&a, &b| depths[b].partial_cmp(&depths[a]).unwrap());
+        // Sorted first == drawn first == furthest away.
+        assert!(depths[order[0]] >= depths[order[3]]);
+        assert!(
+            (depths[0] - depths[1]).abs() > 1.0,
+            "left and right feet are at the same depth - side offsets are not reaching the projection"
         );
     }
 
