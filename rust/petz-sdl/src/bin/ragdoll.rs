@@ -638,10 +638,10 @@ fn main() -> Result<(), String> {
     let mut last = Instant::now();
 
     println!(
-        "drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed\n\
-         V: view pitch   light: arrows   ambience: Z/X   steps: [ ]   texture: T\n\
-         flex: , .   eyes: H/J forward, K/L out   P: settings   R: reset\n\
-         Space: pause   Esc: quit"
+        "drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
+         light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
+         eyes: H/J radius, K/L angle, U/I bias, N/M lid, F/G tilt\n\
+         P: settings   R: reset   Space: pause   Esc: quit"
     );
     report(light, steps, tex_idx, textures[tex_idx].0);
 
