@@ -1,0 +1,9 @@
+[package]
+name = "petz-sdl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+petz-core = { path = "../petz-core" }
+sdl2 = "0.38"

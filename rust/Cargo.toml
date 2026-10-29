@@ -1,5 +1,5 @@
 [workspace]
-members = ["petz-core", "petz-headless"]
+members = ["petz-core", "petz-headless", "petz-sdl"]
 resolver = "2"
 
 [workspace.package]

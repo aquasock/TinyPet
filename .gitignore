@@ -16,3 +16,6 @@ harness/*.dll
 
 # Rust build output
 rust/target/
+
+# SDL player build artefacts
+rust/target/
