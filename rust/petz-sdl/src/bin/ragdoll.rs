@@ -35,8 +35,21 @@ use petz_core::{draw_disc, draw_disc_on_sphere, draw_flat_disc, draw_ring, Depth
 use std::fs;
 use std::path::PathBuf;
 
-const W: usize = 640;
-const H: usize = 480;
+const W: usize = 320;
+const H: usize = 240;
+/// How much bigger than authored the animal is drawn. The skeleton is in
+/// pixels and stays there, so zooming is a projection-time multiply on its
+/// local offsets and radii - the shape is untouched, only its scale.
+///
+/// Default is a half: at 320x240 the animal at authored size filled half the
+/// window's width, which left no room to walk around in. `PETZ_ZOOM` sets it
+/// per run.
+const DEFAULT_ZOOM: f32 = 0.5;
+
+/// The horizon, in screen pixels. `GROUND` is the skeleton's own floor in body
+/// units and does not move with the surface; this is where that floor lands on
+/// screen, and it halves with `H` so the animal keeps its footing.
+const VIEW_GROUND: f32 = GROUND * 0.5;
 const BACKGROUND: u8 = 130;
 
 const OUTLINE: u8 = 89;
@@ -53,6 +66,10 @@ const LIGHT: u8 = 10;
 const DARK: u8 = 0;
 /// The nose, for this diagnostic set: a clear pink against the black coat.
 const PINK: u8 = 70;
+/// Ball 5, the muzzle: a bright blue with enough of a family in the palette to
+/// shade. Pure blue (252) has two entries and comes out flat, like the sclera
+/// white did.
+const MUZZLE_BLUE: u8 = 240;
 /// Retail `;L eye` colour: white sclera.
 const SCLERA: u8 = 245;
 /// Retail `;L iris` colour: black pupil, with the iris ring drawn as its
@@ -249,7 +266,7 @@ fn build() -> (Ragdoll, Creature) {
     let neck = *spine.last().unwrap();
     let skull = r.add(Particle::new(386.0, base_y - 26.0, 26.0, BODY));
     // Out along the axis by 2 px, about 10% of its offset from the skull.
-    let muzzle = r.add(Particle::new(408.0, base_y - 16.0, 13.0, LIGHT));
+    let muzzle = r.add(Particle::new(408.0, base_y - 16.0, 13.0, MUZZLE_BLUE));
     // Out on the tip, clear of the muzzle's own sphere. Closer in it counts as
     // *inside* the muzzle and the containment rule hides it, which is what
     // swallowed the black tip.
@@ -438,7 +455,10 @@ const TURN_BUTTON_RATE: f32 = 1.8;
 
 impl Walker {
     fn new(creature: &Creature, particles: usize) -> Self {
-        let body = Body { pos: WVec3::new(320.0, -520.0, 0.0), heading: 0.42 };
+        // Half of the old start: the surface is half the size, so the same spot
+        // on screen is half the world coordinates. The skeleton itself is
+        // untouched, which is what keeps the animal's detail.
+        let body = Body { pos: WVec3::new(160.0, -260.0, 0.0), heading: 0.42 };
         // Lag by part. The head leads, the body follows, the tail trails - the
         // same overlapping action an animator would key by hand.
         let mut lag = vec![0.28; particles];
@@ -516,8 +536,8 @@ impl Walker {
         // player's job: an animal that turns itself round makes any angle you
         // are trying to look at impossible to hold.
         // Bounds of the visible patch of ground at the default view pitch.
-        let cx = nx.clamp(70.0, 560.0);
-        let cy = ny.clamp(-700.0, 300.0);
+        let cx = nx.clamp(35.0, 280.0);
+        let cy = ny.clamp(-350.0, 150.0);
         let blocked = (cx - nx).abs() > 1e-3 || (cy - ny).abs() > 1e-3;
         self.body.pos.x = cx;
         self.body.pos.y = cy;
@@ -790,10 +810,24 @@ fn window_at() -> Option<(i32, i32)> {
 fn main() -> Result<(), String> {
     let sdl = sdl2::init()?;
     let video = sdl.video()?;
-    let display = video.display_bounds(0).map_err(|e| e.to_string())?;
-    let scale = (display.width() as i32 / W as i32)
-        .min(display.height() as i32 / H as i32)
-        .max(1) as usize;
+    // Two presentations of the same 320x240 surface. The rasterizer, the depth
+    // buffer and the span table are identical either way - only the window you
+    // look through changes, so nothing you see in one mode is untrue in the
+    // other.
+    //
+    //   dev     (default)  the surface doubled to 640x480, for working on it
+    //   low                the surface at 1:1, 320x240, the low-end target
+    //
+    // `PETZ_MODE=low` selects the target; `PETZ_SCALE` overrides the window
+    // multiplier outright, including to something bigger than either.
+    let low_end = std::env::var("PETZ_MODE")
+        .map(|m| m.eq_ignore_ascii_case("low") || m.eq_ignore_ascii_case("lowend"))
+        .unwrap_or(false);
+    let scale = std::env::var("PETZ_SCALE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or(if low_end { 1 } else { 2 });
 
     let mut builder = video.window("petz ragdoll sandbox", (W * scale) as u32, (H * scale) as u32);
     // Where the window lands is not this program's business. It used to centre
@@ -819,7 +853,9 @@ fn main() -> Result<(), String> {
     let mut ramps: HashMap<u8, Ramp> = HashMap::new();
     let mut rebuild_ramps = |steps: usize, ramps: &mut HashMap<u8, Ramp>| {
         ramps.clear();
-        for base in [BODY, LIGHT, DARK] {
+        // Every colour the creature actually paints with needs a ramp, or its
+        // ball comes out flat - one value regardless of the light.
+        for base in [BODY, LIGHT, DARK, MUZZLE_BLUE] {
             ramps.insert(base, Ramp::from_palette(&palette, base, steps));
         }
     };
@@ -840,7 +876,12 @@ fn main() -> Result<(), String> {
     let mut grab_point = Vec2::new(0.0, 0.0);
     let mut grab_home = Vec2::new(0.0, 0.0);
     let mut grab_side = 0.0f32;
-    let mut view = View::new(25.0, GROUND);
+    let mut view = View::new(25.0, VIEW_GROUND);
+    let zoom: f32 = std::env::var("PETZ_ZOOM")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| *v > 0.0)
+        .unwrap_or(DEFAULT_ZOOM);
     // Projected positions from the last frame; the picker works in screen space.
     let mut screen: Vec<Projected> = Vec::new();
 
@@ -860,8 +901,14 @@ fn main() -> Result<(), String> {
     let mut acc = 0.0f64;
     let mut last = Instant::now();
 
+    let (mode_name, win_w, win_h) = (
+        if low_end { "low-end" } else { "dev" },
+        W * scale,
+        H * scale,
+    );
     println!(
-        "drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
+        "mode: {mode_name} - surface {W}x{H}, window {win_w}x{win_h}, zoom {zoom}\n\
+         drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
          light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
          (the ear balls are frozen: no keys - see EAR_* in the source)\n\
          Tab: ball numbers   P: settings   R: reset   Space: pause   Esc: quit"
@@ -1133,7 +1180,11 @@ fn main() -> Result<(), String> {
         for (i, p) in doll.particles.iter().enumerate() {
             let world = walker
                 .part(i)
-                .to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y);
+                .to_world(
+                    (p.pos.x - BODY_ORIGIN) * zoom,
+                    p.side * zoom,
+                    (GROUND - p.pos.y) * zoom,
+                );
             screen.push(view.project(world));
         }
 
@@ -1197,7 +1248,7 @@ fn main() -> Result<(), String> {
             ];
             let planes = ear_planes(sk_depth, depths);
             for (n, &ear) in order.iter().enumerate() {
-                let r = doll.particles[ear].radius;
+                let r = doll.particles[ear].radius * zoom;
                 let d = screen[ear].depth;
                 // The rasterizer puts a ball's *surface* at `centre - nz *
                 // radius`, so the plane has to be carried by the radius: put
@@ -1214,7 +1265,7 @@ fn main() -> Result<(), String> {
                 continue;
             }
             let p = &doll.particles[i];
-            let r = p.radius.round() as i32;
+            let r = (p.radius * zoom).round() as i32;
             if r < 1 { continue; }
             let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
             let cd = screen[i].depth + p.z_bias;
@@ -1258,7 +1309,7 @@ fn main() -> Result<(), String> {
             let (cx, cy) = (screen[sclera].x, screen[sclera].y);
             let ix = cx.round() as i32;
             let iy = cy.round() as i32;
-            let re = sp.radius.max(1.0);
+            let re = (sp.radius * zoom).max(1.0);
             let de = screen[sclera].depth;
 
             if inner_visible {
@@ -1272,7 +1323,7 @@ fn main() -> Result<(), String> {
                 let off = re * fe.x;
                 let px = (cx + off).round() as i32;
                 let ip = &doll.particles[iris];
-                let ri = ip.radius.max(1.0);
+                let ri = (ip.radius * zoom).max(1.0);
                 let inside = {
                     let (cx0, cy0, re0) = (cx, cy, re);
                     move |x: i32, y: i32| -> bool {

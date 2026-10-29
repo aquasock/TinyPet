@@ -12,7 +12,9 @@ Read this as orientation, not law. Refresh live state (`git status`, `git log`,
   pinned body segments. Pushed.
 - **Nose: not started.** The retail game was run tonight for reference and was
   not copied; the plan is our own nose and mouth, not retail's.
-- Tree clean, `main` level with `origin/main` at `ae1d50d`.
+- **The surface is 320x240**, the animal drawn at half its authored size, with
+  two windows onto it: dev (640x480, default) and low-end (`PETZ_MODE=low`,
+  320x240 at 1:1). This is the baseline to work from - see "Resolution" below.
 
 ## Landed tonight
 
@@ -29,7 +31,7 @@ The shape of it:
 
 ## Verified, and how
 
-- `cargo test --workspace`: 60 tests, all green (39 core, 2 silhouette, 19 in
+- `cargo test --workspace`: 62 tests, all green (39 core, 2 silhouette, 21 in
   the sandbox binary). Counts test expects 31 balls, 11 on the head.
 - Ear tips: given a diagnostic colour no body ramp can reach, the framebuffer
   was dumped at 0/90/180/270 and pixels counted - 304 of 308 expected head on,
@@ -63,6 +65,20 @@ The shape of it:
 - No mouth, no tongue, no tail detail beyond four balls.
 - Physics is sagittal only - lateral motion is authored - and feet slide during
   a turn instead of stepping.
+
+## Resolution and modes
+
+The renderer is 320x240 with one projection pixel per surface pixel. That
+surface is presented two ways, and the renderer is identical in both:
+
+- **dev** (default) - window 640x480, the surface doubled, for working on it
+- **low** (`PETZ_MODE=low`) - window 320x240 at 1:1, the low-end target
+
+`PETZ_SCALE=n` overrides the window multiplier, `PETZ_ZOOM=n` the animal's size
+(default 0.5), `PETZ_WINDOW=x,y` the launch position, `PETZ_DIAG` the ear/rim
+diagnostic colours. Halving the surface cost nothing in the rasterizer: the span
+table was captured at the 640x480 diameters and every diameter in use is inside
+its range.
 
 ## Next step
 

@@ -23,9 +23,25 @@ Two consequences worth stating plainly:
 ## Running it
 
 ```sh
-cargo test --workspace                  # 60 tests
-cargo run --release -p petz-sdl --bin ragdoll
+cargo test --workspace                  # 62 tests
+cargo run --release -p petz-sdl --bin ragdoll            # dev: 640x480 window
+cargo run --release -p petz-sdl --bin ragdoll            # PETZ_MODE=low for 320x240
 ```
+
+The surface is **320x240** whatever the window. There are two windows onto it,
+and the renderer is identical in both - same rasterizer, same depth buffer, same
+span table - so nothing seen in one is untrue in the other:
+
+- **dev** (default) - the surface doubled to a 640x480 window, so the pixels are
+  big enough to work on
+- **low** (`PETZ_MODE=low`) - the surface at 1:1, a 320x240 window, which is the
+  low-end target: a quarter of the pixels to fill and a 300 KB depth buffer
+
+The animal is drawn at half its authored size (`PETZ_ZOOM`, default 0.5); at
+full size it filled half the width of a 320x240 window and left no room to walk.
+`PETZ_SCALE=n` overrides the window multiplier outright and `PETZ_ZOOM=n` the
+animal's, so both can be changed without a rebuild. `PETZ_WINDOW=x,y` places the
+window at creation.
 
 Keys: drag to grab, **`W`/`S` forward and back**, **`A`/`D` turn left and right**
 (hold, not toggle; `Q`/`E` are the same), `+`/`-` speed, `V` view pitch, arrows
