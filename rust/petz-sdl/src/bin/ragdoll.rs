@@ -321,6 +321,8 @@ struct Walker {
     /// 1 closed, and the tilt of the line that divides lid from open eye.
     lid_drop: f32,
     lid_tilt: f32,
+    /// How far above the skull's centre the eyes sit, in body units.
+    eye_lift: f32,
     /// Last movement input, so the pose knows whether to animate a gait.
     moving: f32,
 }
@@ -368,6 +370,7 @@ impl Walker {
             eye_bias: 1.5,
             lid_drop: 0.26,
             lid_tilt: 0.14,
+            eye_lift: 8.0,
             moving: 1.0,
         }
     }
@@ -452,8 +455,9 @@ impl Walker {
             // walks them round the skull instead of through it.
             let target = Vec2::new(
                 skull_now.x + self.eye_radius * self.eye_angle.cos(),
-                skull_now.y + (y - skull_rest.y),
+                skull_now.y - self.eye_lift,
             );
+            let _ = (y, skull_rest);
             for i in [sclera, iris] {
                 // Pinned, so this is exact: the solver cannot pull the two eyes
                 // out of symmetry.
@@ -561,9 +565,10 @@ fn eye_pixel_ok(
 
 fn report_eyes(w: &Walker) {
     println!(
-        "eyes: angle {:.0} deg  radius {:.1}  bias {:.1}  lid {:.2} tilt {:.2}",
+        "eyes: angle {:.0} deg  radius {:.1}  lift {:.1}  bias {:.1}  lid {:.2} tilt {:.2}",
         w.eye_angle.to_degrees(),
         w.eye_radius,
+        w.eye_lift,
         w.eye_bias,
         w.lid_drop,
         w.lid_tilt
@@ -644,7 +649,7 @@ fn main() -> Result<(), String> {
     println!(
         "drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
          light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
-         eyes: H/J radius, K/L angle, U/I bias, N/M lid, F/G tilt\n\
+         eyes: H/J radius, K/L angle, PgUp/PgDn height, U/I bias, N/M lid, F/G tilt\n\
          P: settings   R: reset   Space: pause   Esc: quit"
     );
     report(light, steps, tex_idx, textures[tex_idx].0);
@@ -763,6 +768,14 @@ fn main() -> Result<(), String> {
                     }
                     sdl2::keyboard::Keycode::G => {
                         walker.lid_tilt = (walker.lid_tilt + 0.03).min(0.6);
+                        report_eyes(&walker);
+                    }
+                    sdl2::keyboard::Keycode::PageUp => {
+                        walker.eye_lift = (walker.eye_lift + 1.0).min(24.0);
+                        report_eyes(&walker);
+                    }
+                    sdl2::keyboard::Keycode::PageDown => {
+                        walker.eye_lift = (walker.eye_lift - 1.0).max(-8.0);
                         report_eyes(&walker);
                     }
                     sdl2::keyboard::Keycode::U => {
