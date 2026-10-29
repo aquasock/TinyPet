@@ -21,6 +21,7 @@
 
 use std::collections::HashMap;
 
+use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use std::time::Instant;
@@ -287,16 +288,20 @@ struct Walker {
     /// the whole skeleton to a new orientation.
     facing: Vec<f32>,
     lag: Vec<f32>,
-    walking: bool,
     /// How far forward and how far to the side the eyes sit. Live-tunable
     /// because where the eye stops clearing the skull is a judgement call, not
     /// something that can be derived from first principles.
     eye_fwd: f32,
     eye_out: f32,
+    /// Last movement input, so the pose knows whether to animate a gait.
+    moving: f32,
 }
 
 /// Fastest the animal's body can turn, in radians per second.
 const MAX_TURN_RATE: f32 = 2.4;
+
+/// How fast A/D turn the animal, in radians per second.
+const TURN_BUTTON_RATE: f32 = 1.8;
 
 impl Walker {
     fn new(creature: &Creature, particles: usize) -> Self {
@@ -328,9 +333,9 @@ impl Walker {
             heading_body: body.heading,
             facing: vec![body.heading; particles],
             lag,
-            walking: true,
             eye_fwd: 404.0,
             eye_out: 24.0,
+            moving: 1.0,
         }
     }
 
@@ -353,17 +358,21 @@ impl Walker {
         Body { pos: self.body.pos, heading: self.facing.get(i).copied().unwrap_or(self.heading_body) }
     }
 
-    fn advance(&mut self, dt: f32) {
+    /// `moving` is +1 forward, -1 backward, 0 standing. `turning` is -1 left,
+    /// +1 right, 0 straight.
+    fn advance(&mut self, dt: f32, moving: f32, turning: f32) {
         // Turning happens whether or not the animal is moving - a dog can look
         // round while standing.
+        self.body.heading += turning * TURN_BUTTON_RATE * dt;
+        self.moving = moving;
         self.turn(dt);
 
-        if !self.walking {
+        if moving == 0.0 {
             return;
         }
         let f = Body { pos: self.body.pos, heading: self.heading_body }.forward();
-        let nx = self.body.pos.x + f.x * self.gait.spec.speed * dt;
-        let ny = self.body.pos.y + f.y * self.gait.spec.speed * dt;
+        let nx = self.body.pos.x + f.x * self.gait.spec.speed * moving * dt;
+        let ny = self.body.pos.y + f.y * self.gait.spec.speed * moving * dt;
         // Stay on the visible ground by stopping, not by turning. Turning is the
         // player's job: an animal that turns itself round makes any angle you
         // are trying to look at impossible to hold.
@@ -374,21 +383,24 @@ impl Walker {
         self.body.pos.x = cx;
         self.body.pos.y = cy;
         if !blocked {
-            self.gait.advance(dt);
+            // Running the gait backwards makes the feet plant correctly when
+            // the animal reverses, instead of skating.
+            self.gait.advance(dt * moving.signum());
         }
     }
 
     /// Drive the skeleton toward the pose the gait describes.
     fn pose(&self, doll: &mut Ragdoll, creature: &Creature, rest: &Pose) {
+        let walking = self.moving != 0.0;
         // A small vertical bob, twice per cycle: the body rises as the legs
         // pass under it.
         let bob = (self.gait.phase * std::f32::consts::TAU * 2.0).sin() * 2.0;
-        let lift = if self.walking { bob } else { 0.0 };
+        let lift = if walking { bob } else { 0.0 };
 
         let n = creature.spine.len().max(1);
         for (i, &p) in creature.spine.iter().enumerate() {
             let t = i as f32 / (n - 1).max(1) as f32;
-            let (dv, dl) = if self.walking { self.gait.spine_flex(t) } else { (0.0, 0.0) };
+            let (dv, dl) = if walking { self.gait.spine_flex(t) } else { (0.0, 0.0) };
             // dv is upward, and body y runs down, so it subtracts.
             doll.drive_to(p, Vec2::new(rest.spine[i].x, rest.spine[i].y + lift - dv), 0.45);
             // Lateral flex is authored rather than solved: the spine's sway is
@@ -410,7 +422,7 @@ impl Walker {
         }
 
         for (i, leg) in creature.legs.iter().enumerate() {
-            let foot = if self.walking {
+            let foot = if walking {
                 let f = self.gait.foot(i);
                 Vec2::new(leg.rest.x + f.dx, GROUND + f.dy)
             } else {
@@ -539,6 +551,7 @@ fn main() -> Result<(), String> {
     let mut sweep_t = 0.0f32;
     let mut sweep_last = Instant::now();
     let mut frame_no = 0u32;
+    let mut held: std::collections::HashSet<Keycode> = std::collections::HashSet::new();
     let mut events = sdl.event_pump()?;
     let mut paused = false;
     let step = 1.0 / 120.0;
@@ -546,9 +559,10 @@ fn main() -> Result<(), String> {
     let mut last = Instant::now();
 
     println!(
-        "drag: left mouse   W: walk/stop   +/-: speed   Q/E: turn   V: view pitch\n\
-         light: arrows   ambience: A/S   steps: [ ]   texture: T   flex: , .   P: settings\n\
-         eyes: H/J forward, K/L out   R: reset   Space: pause   Esc: quit"
+        "drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed\n\
+         V: view pitch   light: arrows   ambience: Z/X   steps: [ ]   texture: T\n\
+         flex: , .   eyes: H/J forward, K/L out   P: settings   R: reset\n\
+         Space: pause   Esc: quit"
     );
     report(light, steps, tex_idx, textures[tex_idx].0);
 
@@ -556,7 +570,9 @@ fn main() -> Result<(), String> {
         for e in events.poll_iter() {
             match e {
                 sdl2::event::Event::Quit { .. } => break 'outer,
-                sdl2::event::Event::KeyDown { keycode: Some(k), .. } => match k {
+                sdl2::event::Event::KeyDown { keycode: Some(k), .. } => {
+                    held.insert(k);
+                    match k {
                     sdl2::keyboard::Keycode::Escape => break 'outer,
                     sdl2::keyboard::Keycode::R => {
                         // Rebuilding resets indices as well as pose, so the
@@ -567,7 +583,7 @@ fn main() -> Result<(), String> {
                         grabbed = None;
                     }
                     sdl2::keyboard::Keycode::Space => paused = !paused,
-                    sdl2::keyboard::Keycode::W => walker.walking = !walker.walking,
+
                     sdl2::keyboard::Keycode::Comma => {
                         walker.gait.spec.flex_vertical = (walker.gait.spec.flex_vertical - 0.5).max(0.0);
                         walker.gait.spec.flex_lateral = (walker.gait.spec.flex_lateral - 0.5).max(0.0);
@@ -584,14 +600,7 @@ fn main() -> Result<(), String> {
                             walker.gait.spec.flex_vertical, walker.gait.spec.flex_lateral
                         );
                     }
-                    sdl2::keyboard::Keycode::Q => {
-                        walker.body.heading -= 0.26;
-                        println!("heading {:.0} deg", walker.body.heading.to_degrees());
-                    }
-                    sdl2::keyboard::Keycode::E => {
-                        walker.body.heading += 0.26;
-                        println!("heading {:.0} deg", walker.body.heading.to_degrees());
-                    }
+
                     sdl2::keyboard::Keycode::V => {
                         let degrees = [0.0f32, 15.0, 25.0, 35.0];
                         let now = view.pitch.to_degrees();
@@ -654,16 +663,20 @@ fn main() -> Result<(), String> {
                         walker.eye_fwd = (walker.eye_fwd + 1.0).min(414.0);
                         println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
                     }
-                    sdl2::keyboard::Keycode::A => {
+                    sdl2::keyboard::Keycode::Z => {
                         light.ambient = (light.ambient - 0.05).max(0.0);
                         report(light, steps, tex_idx, textures[tex_idx].0);
                     }
-                    sdl2::keyboard::Keycode::S => {
+                    sdl2::keyboard::Keycode::X => {
                         light.ambient = (light.ambient + 0.05).min(0.9);
                         report(light, steps, tex_idx, textures[tex_idx].0);
                     }
                     _ => {}
-                },
+                    }
+                }
+                sdl2::event::Event::KeyUp { keycode: Some(k), .. } => {
+                    held.remove(&k);
+                }
                 sdl2::event::Event::MouseButtonDown {
                     x, y, mouse_btn: sdl2::mouse::MouseButton::Left, ..
                 } => {
@@ -770,10 +783,25 @@ fn main() -> Result<(), String> {
         let now = Instant::now();
         acc += (now - last).as_secs_f64().min(0.1);
         last = now;
+        let moving = if held.contains(&Keycode::W) {
+            1.0
+        } else if held.contains(&Keycode::S) {
+            -1.0
+        } else {
+            0.0
+        };
+        let turning = if held.contains(&Keycode::A) || held.contains(&Keycode::Q) {
+            -1.0
+        } else if held.contains(&Keycode::D) || held.contains(&Keycode::E) {
+            1.0
+        } else {
+            0.0
+        };
+
         if !paused {
             while acc >= step {
                 if grabbed.is_none() {
-                    walker.advance(step as f32);
+                    walker.advance(step as f32, moving, turning);
                     walker.pose(&mut doll, &creature, &rest);
                 }
                 doll.step(step as f32);
@@ -960,7 +988,6 @@ fn main() -> Result<(), String> {
         if std::env::var("PETZ_SWEEP").is_ok() {
             sweep_t += (now - sweep_last).as_secs_f32().min(0.1);
             sweep_last = now;
-            walker.walking = false;
             walker.body.heading = sweep_t * 0.35; // 20 deg per second
             frame_no += 1;
             if frame_no % 5 == 0 {
@@ -1008,7 +1035,7 @@ mod walk_tests {
         let dt = 1.0 / 120.0;
         let steps = (seconds / dt) as usize;
         for _ in 0..steps {
-            w.advance(dt);
+            w.advance(dt, 1.0, 0.0);
             w.pose(&mut doll, &c, &rest);
             doll.step(dt);
         }
@@ -1057,7 +1084,7 @@ mod walk_tests {
         let (_, _, _, mut w) = rig();
         let before = w.heading_body;
         w.body.heading = before + 1.2; // ask for a hard turn
-        w.advance(1.0 / 120.0);
+        w.advance(1.0 / 120.0, 1.0, 0.0);
         let moved = (w.heading_body - before).abs();
         assert!(
             moved <= MAX_TURN_RATE / 120.0 + 1e-4,
@@ -1073,7 +1100,7 @@ mod walk_tests {
         let target = w.heading_body + 1.0;
         w.body.heading = target;
         for _ in 0..12 {
-            w.advance(1.0 / 120.0);
+            w.advance(1.0 / 120.0, 1.0, 0.0);
         }
         let head_err = wrap_pi(target - w.facing[c.head[1]]).abs();
         let tail_err = wrap_pi(target - w.facing[*c.tail.last().unwrap()]).abs();
@@ -1091,7 +1118,7 @@ mod walk_tests {
         let target = w.heading_body - 0.9;
         w.body.heading = target;
         for _ in 0..900 {
-            w.advance(1.0 / 120.0);
+            w.advance(1.0 / 120.0, 1.0, 0.0);
         }
         // The head is close to the command almost immediately, the tail last.
         let head_err = wrap_pi(target - w.facing[c.head[1]]).abs();
@@ -1106,7 +1133,7 @@ mod walk_tests {
         let (_, c, _, mut w) = rig();
         w.body.heading = w.heading_body + 1.2;
         for _ in 0..20 {
-            w.advance(1.0 / 120.0);
+            w.advance(1.0 / 120.0, 1.0, 0.0);
         }
         let head = w.facing[c.head[1]];
         let tail = w.facing[*c.tail.last().unwrap()];
@@ -1122,7 +1149,7 @@ mod walk_tests {
         let dt = 1.0 / 120.0;
         let mut worst: f32 = 0.0;
         for _ in 0..240 {
-            w.advance(dt);
+            w.advance(dt, 1.0, 0.0);
             w.pose(&mut doll, &c, &rest);
             doll.step(dt);
             let pts: Vec<(f32, f32)> = c
@@ -1148,7 +1175,7 @@ mod walk_tests {
         let (mut doll, c, rest, mut w) = rig();
         let dt = 1.0 / 120.0;
         for _ in 0..120 {
-            w.advance(dt);
+            w.advance(dt, 1.0, 0.0);
             w.pose(&mut doll, &c, &rest);
             doll.step(dt);
         }
@@ -1186,7 +1213,7 @@ mod walk_tests {
         }
         // Let it walk on for three seconds.
         for _ in 0..360 {
-            w.advance(dt);
+            w.advance(dt, 1.0, 0.0);
             w.pose(&mut doll, &c, &rest);
             doll.step(dt);
         }
@@ -1214,8 +1241,7 @@ mod walk_tests {
         // Settle first: the eye's runtime position comes from the tunables via
         // pose(), not from where it was built.
         let (mut doll, c, rest, mut w) = rig();
-        w.walking = false;
-        w.body.heading = heading;
+                w.body.heading = heading;
         w.heading_body = heading;
         for f in w.facing.iter_mut() {
             *f = heading;
@@ -1343,7 +1369,7 @@ mod walk_tests {
         let mut highest = vec![f32::MIN; c.legs.len()];
         let samples = 240;
         for _ in 0..samples {
-            w.advance(dt);
+            w.advance(dt, 1.0, 0.0);
             w.pose(&mut doll, &c, &rest);
             doll.step(dt);
             for (i, leg) in c.legs.iter().enumerate() {
@@ -1387,7 +1413,7 @@ mod walk_tests {
         let mut lo = f32::MAX;
         let mut hi = f32::MIN;
         for _ in 0..240 {
-            w.advance(dt);
+            w.advance(dt, 1.0, 0.0);
             w.pose(&mut doll, &c, &rest);
             doll.step(dt);
             let leg = &c.legs[0];

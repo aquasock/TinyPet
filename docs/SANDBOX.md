@@ -27,9 +27,14 @@ cargo test --workspace                  # 37 tests
 cargo run --release -p petz-sdl --bin ragdoll
 ```
 
-Keys: drag to grab, `W` walk/stop, `+/-` speed, `Q/E` turn, `V` view pitch,
-arrows light, `A/S` ambience, `[ ]` ramp steps, `T` texture, `,`/`.` spine flex,
-`P` print settings, `R` reset, `Space` pause, `Esc` quit.
+Keys: drag to grab, **`W`/`S` forward and back**, **`A`/`D` turn left and right**
+(hold, not toggle), `+/-` speed, `V` view pitch, arrows move the light, `Z`/`X`
+ambience, `[ ]` ramp steps, `T` texture, `,`/`.` spine flex, `H`/`J` eye forward,
+`K`/`L` eye outboard, `P` print settings, `R` reset, `Space` pause, `Esc` quit.
+
+The big number in the top left is the facing: **0** away from the viewer, **90**
+right, **180** towards the viewer, **270** left. It shows the *actual* facing,
+including the turn rate limit and per-part lag, so it eases rather than jumping.
 
 ## Layers
 
