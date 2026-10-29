@@ -43,12 +43,36 @@ _fill_entry:
 _tex_entry:
     pushad
     pushfd
-    mov     eax, dword ptr [esp+40]
-    mov     edx, dword ptr [esp+28]
+    mov     eax, dword ptr [esp+40]     /* arg1: CircleRenderBlock& */
+    mov     edx, dword ptr [esp+28]     /* ecx: this (XDrawPort*) */
+    mov     ebx, dword ptr [esp+48]     /* arg3: int& out (row offset) */
+    mov     dword ptr [_g_tex_out], ebx
     push    eax
     push    edx
     call    _tex_probe
     add     esp, 8
+
+    /* swap return address for the post stub */
+    mov     eax, dword ptr [esp+36]
+    mov     dword ptr [_g_tex_ret], eax
+    mov     eax, dword ptr [_g_tex_post]
+    mov     dword ptr [esp+36], eax
+
     popfd
     popad
     jmp     dword ptr [_g_tex_tramp]
+
+/* Post-call observation for _initTextureDrawing: swap the return address so we
+ * land back in our stub with eax still holding the returned texture pointer. */
+    .globl _tex_post_entry
+_tex_post_entry:
+    pushad
+    pushfd
+    /* after pushad(32)+pushfd(4), saved EAX sits at [esp+32] */
+    mov     eax, dword ptr [esp+32]
+    push    eax
+    call    _tex_post_probe
+    add     esp, 4
+    popfd
+    popad
+    jmp     dword ptr [_g_tex_ret]

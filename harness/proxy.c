@@ -312,6 +312,10 @@ static HPALETTE WINAPI hook_CreatePalette(const LOGPALETTE *lp)
 /* ------------------------------------------------------- inline hook */
 
 extern void tex_entry(void);
+extern void tex_post_entry(void);
+void *g_tex_ret = NULL;
+void *g_tex_out = NULL;      /* int* passed by the caller (row offset) */
+void *g_tex_post = (void *)tex_post_entry;
 void *g_tex_tramp = NULL;
 static volatile LONG g_tex_calls = 0;
 
@@ -326,6 +330,33 @@ void tex_probe(void *drawport, void *block)
     p = put_hex64(p, (unsigned long long)(ULONG_PTR)drawport);
     lstrcpyA(p, " block="); p += lstrlenA(p);
     p = put_hex64(p, (unsigned long long)(ULONG_PTR)block);
+    *p = 0;
+    slog(buf);
+}
+
+void tex_post_probe(unsigned ret)
+{
+    static volatile LONG posts = 0;
+    if (InterlockedIncrement(&posts) > 3) return;
+
+    int out_val = 0;
+    if (g_tex_out) out_val = *(int *)g_tex_out;
+
+    char buf[192], *p = buf;
+    lstrcpyA(p, "texret#"); p += lstrlenA(p);
+    p = put_uint(p, (unsigned long)posts);
+    lstrcpyA(p, " tex="); p += lstrlenA(p);
+    p = put_hex64(p, (unsigned long long)ret);
+    lstrcpyA(p, " out="); p += lstrlenA(p);
+    p = put_uint(p, (unsigned long)(out_val < 0 ? 0 : out_val));
+    lstrcpyA(p, " bytes="); p += lstrlenA(p);
+    if (ret) {
+        const unsigned char *b = (const unsigned char *)(ULONG_PTR)ret;
+        for (int i = 0; i < 8; i++) {
+            *p++ = "0123456789abcdef"[b[i] >> 4];
+            *p++ = "0123456789abcdef"[b[i] & 0xF];
+        }
+    }
     *p = 0;
     slog(buf);
 }
