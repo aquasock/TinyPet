@@ -23,6 +23,9 @@
 #include <windows.h>
 #include <string.h>
 
+typedef const char *(__cdecl *pNameFn)(int);
+static void *find_export(const char *want);
+
 /* ---------------------------------------------------------------- logging */
 
 static void slog(const char *msg)
@@ -308,6 +311,7 @@ static BOOL WINAPI hook_DeleteObject(HGDIOBJ obj)
 }
 
 /* ------------------------------------------------------------- profiler */
+static void flush_dispatch(void);
 /* perf is unusable here (perf_event_paranoid=4, no sudo), so we sample the main
  * thread's EIP from inside the process. Coverage, not exact timing: 1 kHz over
  * a session is plenty to rank which of the 5,719 methods actually run. */
@@ -319,6 +323,7 @@ static BOOL WINAPI hook_DeleteObject(HGDIOBJ obj)
 static unsigned int *g_hist = NULL;
 static DWORD g_main_tid = 0;
 static volatile LONG g_prof_on = 0;
+static int g_do_sample = 0;
 
 typedef DWORD (WINAPI *pTimeBeginPeriod)(UINT);
 typedef DWORD (WINAPI *pTimeEndPeriod)(UINT);
@@ -336,8 +341,41 @@ static DWORD WINAPI profiler_thread(LPVOID unused)
     if (!h) { slog("profiler: cannot open main thread"); return 1; }
 
     DWORD last_flush = GetTickCount();
+    /* One-shot: enumerate the behaviour registry so ids can be named offline. */
+    {
+        char dn[8];
+        if (GetEnvironmentVariableA("PETZ_DUMPNAMES", dn, sizeof(dn)) > 0) {
+            Sleep(15000);   /* the registry is built during game startup, not at load */
+            pNameFn gf = (pNameFn)find_export("?GetGoalStringName@SBehaviorRegistry@@SAPBDH@Z");
+            pNameFn pf = (pNameFn)find_export("?GetPlanStringName@SBehaviorRegistry@@SAPBDH@Z");
+            HANDLE f = CreateFileA("names.txt", GENERIC_WRITE, FILE_SHARE_READ, NULL,
+                                   CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (f != INVALID_HANDLE_VALUE) {
+                DWORD n; char line[96];
+                for (int k = 0; k < 2; k++) {
+                    pNameFn fn = k ? pf : gf;
+                    if (!fn) continue;
+                    for (int i = 0; i < 200; i++) {
+                        const char *nm = fn(i);
+                        if (!nm) continue;
+                        char *p2 = line;
+                        p2 = put_uint(p2, (unsigned long)k); *p2++ = ' ';
+                        p2 = put_uint(p2, (unsigned long)i); *p2++ = ' ';
+                        for (const char *q = nm; *q && p2 < line + 80; q++) *p2++ = *q;
+                        *p2++ = '\n';
+                        WriteFile(f, line, (DWORD)(p2 - line), &n, NULL);
+                    }
+                }
+                CloseHandle(f);
+                slog("names dumped");
+            }
+            return 0;
+        }
+    }
+
     for (;;) {
-        Sleep(1);
+        Sleep(5);
+        if (!g_do_sample) { flush_dispatch(); continue; }   /* ~200 Hz: 1 kHz suspend/resume perturbed the target */
         if (SuspendThread(h) == (DWORD)-1) continue;
         CONTEXT c;
         c.ContextFlags = CONTEXT_CONTROL;
@@ -349,6 +387,7 @@ static DWORD WINAPI profiler_thread(LPVOID unused)
         ResumeThread(h);
 
         if (GetTickCount() - last_flush > 5000) {
+            flush_dispatch();
             last_flush = GetTickCount();
             HANDLE f = CreateFileA("profile.bin", GENERIC_WRITE, FILE_SHARE_READ,
                                    NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -365,7 +404,10 @@ static DWORD WINAPI profiler_thread(LPVOID unused)
 static void start_profiler(void)
 {
     char envbuf[8];
-    if (GetEnvironmentVariableA("PETZ_PROFILE", envbuf, sizeof(envbuf)) == 0) return;
+    if (GetEnvironmentVariableA("PETZ_PROFILE", envbuf, sizeof(envbuf)) > 0) g_do_sample = 1;
+    char tr[8];
+    if (GetEnvironmentVariableA("PETZ_TRACE", tr, sizeof(tr)) > 0) g_do_sample = g_do_sample ? 1 : 0;
+    if (!g_do_sample && GetEnvironmentVariableA("PETZ_TRACE", tr, sizeof(tr)) == 0) return;
 
     g_hist = (unsigned int *)VirtualAlloc(NULL, PROF_SLOTS * 4,
                                           MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -413,6 +455,90 @@ static HPALETTE WINAPI hook_CreatePalette(const LOGPALETTE *lp)
 
 extern void tex_entry(void);
 extern void serial_entry(void);
+extern void goal_entry(void);
+extern void plan_entry(void);
+extern void state_entry(void);
+void *g_goal_tramp = NULL, *g_plan_tramp = NULL, *g_state_tramp = NULL;
+static volatile LONG g_dispatch[3] = {0,0,0};
+#define DISP_SLOTS 512
+static unsigned int g_disp_goal[DISP_SLOTS];   /* counts by goal id  */
+static unsigned int g_disp_plan[DISP_SLOTS];   /* counts by plan id  */
+static volatile LONG g_disp_total[3] = {0,0,0};
+static pNameFn g_goal_name_fn = NULL, g_plan_name_fn = NULL;
+static const char *g_goal_name[DISP_SLOTS];
+static const char *g_plan_name[DISP_SLOTS];
+
+static void flush_dispatch(void)
+{
+    HANDLE f = CreateFileA("dispatch.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) return;
+    DWORD n;
+    char line[64];
+    for (int k = 0; k < 2; k++) {
+        unsigned int *tab = k ? g_disp_plan : g_disp_goal;
+        for (int i = 0; i < DISP_SLOTS; i++) {
+            if (!tab[i]) continue;
+            char *p = line;
+            p = put_uint(p, (unsigned long)k);
+            *p++ = ' ';
+            p = put_uint(p, (unsigned long)i);
+            *p++ = ' ';
+            p = put_uint(p, (unsigned long)tab[i]);
+            *p++ = ' ';
+            const char *nm = k ? g_plan_name[i] : g_goal_name[i];
+            if (nm) for (const char *q = nm; *q && p < line + 48; q++) *p++ = *q;
+            *p++ = '\n';
+            WriteFile(f, line, (DWORD)(p - line), &n, NULL);
+        }
+    }
+    CloseHandle(f);
+}
+
+void dispatch_probe(int kind, void *token, int arg)
+{
+    LONG n = InterlockedIncrement(&g_dispatch[kind & 3]);
+    InterlockedIncrement(&g_disp_total[kind & 3]);
+    if ((kind == 0 || kind == 1) && arg >= 0 && arg < DISP_SLOTS) {
+        unsigned int *tabp = (kind == 1) ? g_disp_plan : g_disp_goal;
+        InterlockedIncrement((volatile LONG *)&tabp[arg]);
+        /* cache the human name; the registry stores it at object+0x1c */
+        const char **slot = (kind == 1) ? &g_plan_name[arg] : &g_goal_name[arg];
+        if (!*slot) {
+            pNameFn fn = (kind == 1) ? g_plan_name_fn : g_goal_name_fn;
+            if (fn) *slot = fn(arg);
+        }
+    }
+    if (n > 6) return;
+    /* Only GoalToken and PlanToken are pointers. DispatchState's second and
+     * third arguments are bools - dereferencing them faults (c0000005). */
+    int a = -1, b = -1;
+    if (kind != 2 && token) {
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(token, &mbi, sizeof(mbi)) &&
+            mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_NOACCESS)) {
+            a = *(int *)token;
+            b = *((int *)token + 1);
+        }
+    } else if (kind == 2) {
+        a = (int)(INT_PTR)token;
+    }
+    char buf[160], *p = buf;
+    lstrcpyA(p, "dispatch "); p += lstrlenA(p);
+    *p++ = (char)('0' + (kind % 3));
+    lstrcpyA(p, " n="); p += lstrlenA(p);
+    p = put_uint(p, (unsigned long)n);
+    lstrcpyA(p, " tok="); p += lstrlenA(p);
+    p = put_hex64(p, (unsigned long long)(ULONG_PTR)token);
+    lstrcpyA(p, " f0="); p += lstrlenA(p);
+    p = put_uint(p, (unsigned long)(a < 0 ? 0 : a));
+    lstrcpyA(p, " f1="); p += lstrlenA(p);
+    p = put_uint(p, (unsigned long)(b < 0 ? 0 : b));
+    lstrcpyA(p, " arg="); p += lstrlenA(p);
+    p = put_uint(p, (unsigned long)(arg < 0 ? 0 : arg));
+    *p = 0;
+    slog(buf);
+}
 void *g_serial_tramp = NULL;
 static volatile LONG g_serial_calls = 0;
 extern void tex_post_entry(void);
@@ -509,12 +635,13 @@ static void *find_export(const char *want)
     return NULL;
 }
 
-static void *install_inline(DWORD rva, void *entry, const BYTE *expect, int len)
+static void *install_inline_ex(DWORD rva, void *entry, const BYTE *expect, int expect_len, int steal)
 {
     BYTE *base = (BYTE *)GetModuleHandleA(NULL);
     BYTE *fn = base + rva;
-    for (int i = 0; i < len; i++)
+    for (int i = 0; i < expect_len; i++)
         if (fn[i] != expect[i]) { slog("inline hook: prologue mismatch"); return NULL; }
+    const int len = steal;
 
     BYTE *tramp = (BYTE *)VirtualAlloc(NULL, 64, MEM_COMMIT | MEM_RESERVE,
                                        PAGE_EXECUTE_READWRITE);
@@ -529,6 +656,11 @@ static void *install_inline(DWORD rva, void *entry, const BYTE *expect, int len)
     *(DWORD *)(fn + 1) = (DWORD)entry - (DWORD)(fn + 5);
     VirtualProtect(fn, 32, old, &old);
     return tramp;
+}
+
+static void *install_inline(DWORD rva, void *entry, const BYTE *expect, int len)
+{
+    return install_inline_ex(rva, entry, expect, len, len);
 }
 
 static void install_tex_hook(void)
@@ -806,10 +938,19 @@ static void install_hooks(void)
     }
 
     int n = 0;
-    n += patch_iat(exe, "winmm.dll", "timeGetTime", (void *)hook_timeGetTime);
-    n += patch_iat(exe, "kernel32.dll", "GetTickCount", (void *)hook_GetTickCount);
-    n += patch_iat(exe, "kernel32.dll", "QueryPerformanceCounter", (void *)hook_QueryPerformanceCounter);
-    n += patch_iat(exe, "kernel32.dll", "QueryPerformanceFrequency", (void *)hook_QueryPerformanceFrequency);
+    /* Clock pinning is for deterministic capture runs only. Profiling wants the
+     * game running at its natural speed, so it is opt-in. */
+    {
+        char pin[8];
+        if (GetEnvironmentVariableA("PETZ_PIN_CLOCK", pin, sizeof(pin)) > 0) {
+            n += patch_iat(exe, "winmm.dll", "timeGetTime", (void *)hook_timeGetTime);
+            n += patch_iat(exe, "kernel32.dll", "GetTickCount", (void *)hook_GetTickCount);
+            n += patch_iat(exe, "kernel32.dll", "QueryPerformanceCounter", (void *)hook_QueryPerformanceCounter);
+            n += patch_iat(exe, "kernel32.dll", "QueryPerformanceFrequency", (void *)hook_QueryPerformanceFrequency);
+        } else {
+            slog("clock: not pinned (set PETZ_PIN_CLOCK=1 for capture runs)");
+        }
+    }
     n += patch_iat(exe, "gdi32.dll", "BitBlt", (void *)hook_BitBlt);
     n += patch_iat(exe, "gdi32.dll", "StretchBlt", (void *)hook_StretchBlt);
     n += patch_iat(exe, "gdi32.dll", "CreateDIBSection", (void *)hook_CreateDIBSection);
@@ -835,6 +976,27 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
          * only; enabled explicitly so a normal session runs untouched. */
         {
             char envbuf[8];
+            char tr[8];
+            if (GetEnvironmentVariableA("PETZ_TRACE", tr, sizeof(tr)) > 0) {
+                struct { const char *name; void *entry; void **tramp; BYTE pre[4]; } t[] = {
+                    { "?DispatchGoal@SBehaviorRegistry@@SAXAAVCharacterSprite@@AAVGoalToken@@H@Z",
+                      (void *)goal_entry, &g_goal_tramp, {0x8b,0x44,0x24,0x0c} },
+                    { "?DispatchPlan@SBehaviorRegistry@@SAXAAVCharacterSprite@@AAVPlanToken@@H@Z",
+                      (void *)plan_entry, &g_plan_tramp, {0x8b,0x44,0x24,0x0c} },
+                    { "?DispatchState@SBehaviorRegistry@@SAXAAVCharacterSprite@@_N1H@Z",
+                      (void *)state_entry, &g_state_tramp, {0x8b,0x44,0x24,0x10} },
+                };
+                g_goal_name_fn = (pNameFn)find_export("?GetGoalStringName@SBehaviorRegistry@@SAPBDH@Z");
+                g_plan_name_fn = (pNameFn)find_export("?GetPlanStringName@SBehaviorRegistry@@SAPBDH@Z");
+                for (int i = 0; i < 3; i++) {
+                    void *fn = find_export(t[i].name);
+                    if (!fn) { slog("dispatch hook: export not found"); continue; }
+                    DWORD rva = (DWORD)fn - (DWORD)GetModuleHandleA(NULL);
+                    void *tr2 = install_inline_ex(rva, t[i].entry, t[i].pre, 4, 10);
+                    *t[i].tramp = tr2;
+                    slog(tr2 ? "dispatch hook: installed" : "dispatch hook: prologue mismatch");
+                }
+            }
             if (GetEnvironmentVariableA("PETZ_FILL_HOOK", envbuf, sizeof(envbuf)) > 0) {
                 install_fill_hook();
                 install_tex_hook();

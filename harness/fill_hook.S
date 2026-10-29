@@ -92,3 +92,55 @@ _serial_entry:
     popfd
     popad
     jmp     dword ptr [_g_serial_tramp]
+
+/* Behaviour dispatch trace. SBehaviorRegistry::DispatchGoal/Plan/State are
+ * exported statics, so every behaviour that actually runs passes through them.
+ * Prologues are 4-byte + 6-byte movs (10 bytes, whole instructions).
+ *   DispatchGoal (const CharacterSprite&, GoalToken&, int)
+ *   DispatchPlan (const CharacterSprite&, PlanToken&, int)
+ *   DispatchState(const CharacterSprite&, bool, bool, int)
+ */
+    .globl _goal_entry
+_goal_entry:
+    pushad
+    pushfd
+    mov     eax, dword ptr [esp+44]      /* token reference */
+    mov     edx, dword ptr [esp+48]      /* int arg */
+    push    edx          /* arg  */
+    push    eax          /* token */
+    push    0            /* kind */
+    call    _dispatch_probe
+    add     esp, 12
+    popfd
+    popad
+    jmp     dword ptr [_g_goal_tramp]
+
+    .globl _plan_entry
+_plan_entry:
+    pushad
+    pushfd
+    mov     eax, dword ptr [esp+44]
+    mov     edx, dword ptr [esp+48]
+    push    edx
+    push    eax
+    push    1
+    call    _dispatch_probe
+    add     esp, 12
+    popfd
+    popad
+    jmp     dword ptr [_g_plan_tramp]
+
+    .globl _state_entry
+_state_entry:
+    pushad
+    pushfd
+    mov     eax, dword ptr [esp+44]
+    mov     edx, dword ptr [esp+48]
+    push    edx
+    push    eax
+    push    2
+    call    _dispatch_probe
+    add     esp, 12
+    popfd
+    popad
+    jmp     dword ptr [_g_state_tramp]

@@ -128,6 +128,38 @@ remakes die.
    and `petz-headless`, loading one `.pet` and rendering it via the decoded
    renderer path.
 
+### The behaviour registry, measured
+
+The export count overstates the behaviour library. Enumerating
+`SBehaviorRegistry` at runtime (`GetGoalStringName`/`GetPlanStringName` over the
+whole id range) gives the real population:
+
+```
+goals registered: 114
+plans registered: 112
+```
+
+The 241 "Goal*" exports are support classes - `GoalToken`, `GoalManager`,
+`GoalDescriptor`, `GoalKey`, `GoalHistoryToken`, `GoalRequestToken` - not
+behaviour types.
+
+**One real session** (cat, living room, catnip tree, food and water bowls,
+bubble machine, ball) dispatched:
+
+```
+plans 7,786 total, 12 distinct
+  3807 metascript          247 sharpenClaws      103 followSprite
+  2460 beOnLedge           237 pickUpSprite        90 lookAroundAtToys
+   500 investigateSprite    198 stalkAttackSprite   58 swatSprite
+goals 80 total, 13 distinct
+    24 gravityGame   10 groom        4 greetUser        2 beOnLedge
+    20 pause          6 investigateSprite  4 lookAroundAtToys
+```
+
+So a session exercised **11 of 112 plans and 8 of 114 goals**. Plans fire ~100x
+more often than goals, which is the architecture showing: a goal is chosen
+occasionally, then its plan executes every tick.
+
 ### Profile, first results
 
 `perf` is unusable here (`perf_event_paranoid=4`, no sudo), so the shim samples
