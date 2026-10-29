@@ -20,6 +20,9 @@
 //! R = reset, Space = pause, Esc = quit.
 
 use std::collections::HashMap;
+
+use sdl2::pixels::Color;
+use sdl2::rect::Rect;
 use std::time::Instant;
 
 use petz_core::fur::{dapple, shade_disc_pattern, stripes, Pattern, Texture};
@@ -58,6 +61,51 @@ const GROUND: f32 = 218.0;
 /// authored at absolute x, so this is subtracted before placing them in the
 /// world - otherwise the animal stands a body-length behind its own position.
 const BODY_ORIGIN: f32 = 366.0;
+
+/// A 3x5 digit font, hand-written. The angle readout is the only text the
+/// sandbox needs, and it is not worth a font dependency for that.
+const DIGITS: [[u8; 5]; 10] = [
+    [0b111, 0b101, 0b101, 0b101, 0b111],
+    [0b010, 0b110, 0b010, 0b010, 0b111],
+    [0b111, 0b001, 0b111, 0b100, 0b111],
+    [0b111, 0b001, 0b111, 0b001, 0b111],
+    [0b101, 0b101, 0b111, 0b001, 0b001],
+    [0b111, 0b100, 0b111, 0b001, 0b111],
+    [0b111, 0b100, 0b111, 0b101, 0b111],
+    [0b111, 0b001, 0b001, 0b001, 0b001],
+    [0b111, 0b101, 0b111, 0b101, 0b111],
+    [0b111, 0b101, 0b111, 0b001, 0b111],
+];
+
+/// Draw a non-negative integer in window coordinates.
+fn draw_number(
+    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
+    x: i32,
+    y: i32,
+    scale: i32,
+    value: i32,
+) {
+    let text = value.max(0).to_string();
+    let width = text.len() as i32 * 4 * scale;
+    let _ = canvas.set_draw_color(Color::RGB(0, 0, 0));
+    let _ = canvas.fill_rect(Rect::new(x - 5, y - 5, (width + 9) as u32, (5 * scale + 9) as u32));
+    let _ = canvas.set_draw_color(Color::RGB(255, 255, 255));
+    for (i, ch) in text.chars().enumerate() {
+        let d = ch.to_digit(10).unwrap_or(0) as usize;
+        for (row, bits) in DIGITS[d].iter().enumerate() {
+            for col in 0..3 {
+                if bits & (1 << (2 - col)) != 0 {
+                    let _ = canvas.fill_rect(Rect::new(
+                        x + i as i32 * 4 * scale + col * scale,
+                        y + row as i32 * scale,
+                        scale as u32,
+                        scale as u32,
+                    ));
+                }
+            }
+        }
+    }
+}
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -301,10 +349,21 @@ impl Walker {
         if !self.walking {
             return;
         }
-        self.gait.advance(dt);
         let f = Body { pos: self.body.pos, heading: self.heading_body }.forward();
-        self.body.pos.x += f.x * self.gait.spec.speed * dt;
-        self.body.pos.y += f.y * self.gait.spec.speed * dt;
+        let nx = self.body.pos.x + f.x * self.gait.spec.speed * dt;
+        let ny = self.body.pos.y + f.y * self.gait.spec.speed * dt;
+        // Stay on the visible ground by stopping, not by turning. Turning is the
+        // player's job: an animal that turns itself round makes any angle you
+        // are trying to look at impossible to hold.
+        // Bounds of the visible patch of ground at the default view pitch.
+        let cx = nx.clamp(70.0, 560.0);
+        let cy = ny.clamp(-700.0, 300.0);
+        let blocked = (cx - nx).abs() > 1e-3 || (cy - ny).abs() > 1e-3;
+        self.body.pos.x = cx;
+        self.body.pos.y = cy;
+        if !blocked {
+            self.gait.advance(dt);
+        }
     }
 
     /// Drive the skeleton toward the pose the gait describes.
@@ -684,21 +743,6 @@ fn main() -> Result<(), String> {
                 doll.step(step as f32);
                 acc -= step;
             }
-            // Turn around at the edges rather than teleporting. Wrapping put
-            // the animal half off-screen for stretches at a time, and turning
-            // is something the animal can actually do - the lag we built for
-            // Q/E plays it out.
-            {
-                let f = walker.body.forward();
-                let p = walker.body.pos;
-                let at_edge = (p.x > 540.0 && f.x > 0.0)
-                    || (p.x < 70.0 && f.x < 0.0)
-                    || (p.y > 120.0 && f.y > 0.0)
-                    || (p.y < -470.0 && f.y < 0.0);
-                if at_edge {
-                    walker.body.heading += std::f32::consts::PI;
-                }
-            }
         }
 
         // Place every ball in the world and project it. The z we get back is
@@ -835,6 +879,12 @@ fn main() -> Result<(), String> {
         tex.update(None, &rgb, W * 3).map_err(|e| e.to_string())?;
         canvas.clear();
         canvas.copy(&tex, None, None).map_err(|e| e.to_string())?;
+
+        // Facing, in degrees: 0 is away from the viewer (up the screen), 90 is
+        // to the right, 180 is towards the viewer, 270 to the left.
+        let facing = walker.heading_body.to_degrees().rem_euclid(360.0).round() as i32;
+        draw_number(&mut canvas, 18, 18, 4, facing);
+
         canvas.present();
     }
     Ok(())
