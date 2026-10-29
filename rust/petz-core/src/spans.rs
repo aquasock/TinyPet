@@ -72,6 +72,35 @@ pub fn fill_disc(
     }
 }
 
+/// As `fill_disc`, but `keep` is asked about every pixel first. Used to clip a
+/// ball against another sphere per pixel, which a painter's algorithm cannot do
+/// from centres alone.
+pub fn fill_disc_masked(
+    surface: &mut crate::surface::Surface,
+    table: &SpanTable,
+    cx: i32,
+    cy: i32,
+    diameter: usize,
+    colour: u8,
+    keep: &dyn Fn(i32, i32) -> bool,
+) {
+    for (row, &width) in table.rows(diameter).iter().enumerate() {
+        if width == 0 {
+            continue;
+        }
+        let (y, left, len) = row_span(cx, cy, diameter, row, width);
+        if y < 0 {
+            continue;
+        }
+        for i in 0..len as i32 {
+            let x = left + i;
+            if keep(x, y) {
+                surface.set(x.max(0) as usize, y as usize, colour);
+            }
+        }
+    }
+}
+
 /// Draw a ring of `thickness` pixels inside the silhouette of a disc.
 ///
 /// `XFillOutlineCircle` receives the same render block as the body fill - same

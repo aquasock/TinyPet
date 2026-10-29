@@ -31,7 +31,7 @@ use petz_core::gait::{two_bone_ik, Gait, GaitSpec};
 use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
 use petz_core::project::{Body, Projected, Vec3 as WVec3, View};
 use petz_core::shade::{Light, Ramp, Vec3};
-use petz_core::{fill_disc, Palette, SpanTable, Surface};
+use petz_core::{fill_disc, fill_disc_masked, Palette, SpanTable, Surface};
 use std::fs;
 use std::path::PathBuf;
 
@@ -897,18 +897,14 @@ fn main() -> Result<(), String> {
         let mut order: Vec<usize> = (0..doll.particles.len()).collect();
         order.sort_by(|&a, &b| sort_depth[b].partial_cmp(&sort_depth[a]).unwrap());
 
-        // Rims for the body only. An iris rim drawn here would be painted over
-        // by its own sclera, so it is drawn with the pair instead.
-        for &i in order.iter().filter(|&&i| !is_overlay(i)) {
-            let p = &doll.particles[i];
-            let r = p.radius.round() as i32;
-            if r < 1 { continue; }
-            let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
-            let rim = if p.rim == 0 { OUTLINE } else { p.rim };
-            fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), rim);
-        }
+        // Every ball is a rim then a body. An eye is drawn as one unit: its
+        // outline, sclera, iris ring and pupil all clip by the same per-pixel
+        // rule, so the whole eye goes behind the head together. Drawing the
+        // parts independently let the brown rim blow out while the blue ring
+        // stayed - each layer was deciding for itself.
+        let is_eye = |i: usize| eye_keep.contains_key(&i);
 
-        let mut draw = |i: usize, surface: &mut Surface| {
+        let draw = |i: usize, surface: &mut Surface| {
             let p = &doll.particles[i];
             let r = p.radius.round() as i32;
             if r < 1 { return; }
@@ -928,14 +924,35 @@ fn main() -> Result<(), String> {
             shade_disc_pattern(surface, &table, cx, cy, (r * 2) as usize, light, &pattern);
         };
 
+        for &i in order.iter().filter(|&&i| !is_overlay(i) && !is_eye(i)) {
+            let p = &doll.particles[i];
+            let r = p.radius.round() as i32;
+            if r < 1 { continue; }
+            let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
+            let rim = if p.rim == 0 { OUTLINE } else { p.rim };
+            fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), rim);
+        }
+
         for &i in order.iter().filter(|&&i| !is_overlay(i)) {
+            let overlays = overlays_for(i);
             match eye_keep.get(&i) {
                 Some(keep) => {
-                    let p = &doll.particles[i];
-                    let r = p.radius.round() as i32;
-                    if r >= 1 {
-                        let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
-                        let alt = match p.colour { BODY => LIGHT, LIGHT => BODY, other => other };
+                    for &idx in std::iter::once(&i).chain(overlays.iter()) {
+                        let p = &doll.particles[idx];
+                        let r = p.radius.round() as i32;
+                        if r < 1 { continue; }
+                        let (cx, cy) =
+                            (screen[idx].x.round() as i32, screen[idx].y.round() as i32);
+                        let rim = if p.rim == 0 { OUTLINE } else { p.rim };
+                        fill_disc_masked(
+                            &mut surface, &table, cx, cy,
+                            (((r * 2) + 4) as usize).min(255), rim, keep.as_ref(),
+                        );
+                        let alt = match p.colour {
+                            BODY => LIGHT,
+                            LIGHT => BODY,
+                            other => other,
+                        };
                         let pattern = Pattern {
                             base: ramps.get(&p.colour).cloned().unwrap_or_else(|| Ramp::new(vec![p.colour])),
                             alt: ramps.get(&alt).cloned().unwrap_or_else(|| Ramp::new(vec![alt])),
@@ -944,62 +961,28 @@ fn main() -> Result<(), String> {
                             phase: 0.0,
                         };
                         shade_disc_pattern_masked(
-                            &mut surface, &table, cx, cy, (r * 2) as usize, light, &pattern, keep.as_ref(),
+                            &mut surface, &table, cx, cy, (r * 2) as usize,
+                            light, &pattern, keep.as_ref(),
                         );
                     }
                 }
-                None => draw(i, &mut surface),
-            }
-            // The pair is atomic: rim, body, then the pupil on top of it. It
-            // still sorts by the sclera's depth, so the head can hide it.
-            for over in overlays_for(i) {
-                let p = &doll.particles[over];
-                let r = p.radius.round() as i32;
-                if r >= 1 {
-                    let (cx, cy) =
-                        (screen[over].x.round() as i32, screen[over].y.round() as i32);
-                    let rim = if p.rim == 0 { OUTLINE } else { p.rim };
-                    fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), rim);
-                }
-                match eye_keep.get(&i) {
-                    Some(keep) => {
-                        let r2 = p.radius.round() as i32;
-                        if r2 >= 1 {
-                            let (ox, oy) =
+                None => {
+                    draw(i, &mut surface);
+                    for over in overlays {
+                        let p = &doll.particles[over];
+                        let r = p.radius.round() as i32;
+                        if r >= 1 {
+                            let (cx, cy) =
                                 (screen[over].x.round() as i32, screen[over].y.round() as i32);
-                            let alt2 = match p.colour { BODY => LIGHT, LIGHT => BODY, other => other };
-                            let pat2 = Pattern {
-                                base: ramps.get(&p.colour).cloned().unwrap_or_else(|| Ramp::new(vec![p.colour])),
-                                alt: ramps.get(&alt2).cloned().unwrap_or_else(|| Ramp::new(vec![alt2])),
-                                texture: textures[tex_idx].1.clone(),
-                                threshold: 128,
-                                phase: 0.0,
-                            };
-                            shade_disc_pattern_masked(
-                                &mut surface, &table, ox, oy, (r2 * 2) as usize, light, &pat2, keep.as_ref(),
+                            let rim = if p.rim == 0 { OUTLINE } else { p.rim };
+                            fill_disc(
+                                &mut surface, &table, cx, cy,
+                                (((r * 2) + 4) as usize).min(255), rim,
                             );
                         }
+                        draw(over, &mut surface);
                     }
-                    None => draw(over, &mut surface),
                 }
-            }
-        }
-
-        if std::env::var("PETZ_SWEEP").is_ok() {
-            sweep_t += (now - sweep_last).as_secs_f32().min(0.1);
-            sweep_last = now;
-            walker.body.heading = sweep_t * 0.35; // 20 deg per second
-            frame_no += 1;
-            if frame_no % 5 == 0 {
-                let iris = surface.pixels().iter().filter(|c| **c == IRIS_RING).count();
-                let pupil = surface.pixels().iter().filter(|c| **c == IRIS).count();
-                println!(
-                    "sweep heading={:.0} facing={:.0} iris={} pupil={}",
-                    walker.body.heading.to_degrees() % 360.0,
-                    walker.heading_body.to_degrees(),
-                    iris,
-                    pupil
-                );
             }
         }
 
