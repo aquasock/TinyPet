@@ -194,3 +194,59 @@ _disp_entry:
     popfd
     popad
     jmp     dword ptr [_g_disp_tramp]
+
+    .globl _fill2_entry
+_fill2_entry:
+    pushad
+    pushfd
+    mov     eax, dword ptr [esp+40]
+    mov     edx, dword ptr [esp+28]
+    push    eax
+    push    edx
+    call    _fill_probe
+    add     esp, 8
+    popfd
+    popad
+    jmp     dword ptr [_g_fill2_tramp]
+
+    .globl _fill3_entry
+_fill3_entry:
+    pushad
+    pushfd
+    mov     eax, dword ptr [esp+40]
+    mov     edx, dword ptr [esp+28]
+    push    eax
+    push    edx
+    call    _fill_probe
+    add     esp, 8
+    popfd
+    popad
+    jmp     dword ptr [_g_fill3_tramp]
+
+    .globl _fill4_entry
+_fill4_entry:
+    pushad
+    pushfd
+    mov     eax, dword ptr [esp+40]
+    mov     edx, dword ptr [esp+28]
+    push    eax
+    push    edx
+    call    _fill_probe
+    add     esp, 8
+    popfd
+    popad
+    jmp     dword ptr [_g_fill4_tramp]
+
+    .globl _fill5_entry
+_fill5_entry:
+    pushad
+    pushfd
+    mov     eax, dword ptr [esp+40]
+    mov     edx, dword ptr [esp+28]
+    push    eax
+    push    edx
+    call    _fill_probe
+    add     esp, 8
+    popfd
+    popad
+    jmp     dword ptr [_g_fill5_tramp]

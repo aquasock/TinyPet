@@ -153,6 +153,46 @@ fn main() {
             println!("left: captured   right: petz-core fill_disc (same palette)");
             println!("wrote: {}", path.display());
         }
+        "frame" => {
+            // Render one captured animation frame with our own rasterizer.
+            let table = load_table().expect("tables.raw missing");
+            let palette = load_palette().expect("ball-input.raw missing");
+            let path = repo_root().join("build/animation.petz");
+            let bytes = fs::read(&path).expect("build/animation.petz - run tools/export-frames.py");
+            let mut p = 4usize;
+            let rd_u32 = |p: &mut usize| -> u32 {
+                let v = u32::from_le_bytes(bytes[*p..*p+4].try_into().unwrap()); *p += 4; v
+            };
+            let _ver = rd_u32(&mut p);
+            let frame_count = rd_u32(&mut p) as usize;
+            let want: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(frame_count / 2);
+            let want = want.min(frame_count.saturating_sub(1));
+
+            for idx in 0..=want {
+                let nballs = rd_u32(&mut p) as usize;
+                let start = p;
+                p += nballs * 12;
+                if idx != want { continue; }
+
+                let (w, h) = (640usize, 480usize);
+                let mut surface = Surface::new(w, h);
+                for y in 0..h { for x in 0..w { surface.set(x, y, 12); } }
+                for b in 0..nballs {
+                    let o = start + b * 12;
+                    let cx = i16::from_le_bytes(bytes[o..o+2].try_into().unwrap()) as i32;
+                    let cy = i16::from_le_bytes(bytes[o+2..o+4].try_into().unwrap()) as i32;
+                    let dw = u16::from_le_bytes(bytes[o+4..o+6].try_into().unwrap()) as usize;
+                    let colour = bytes[o+8];
+                    if dw == 0 || dw > table.max_diameter() { continue; }
+                    fill_disc(&mut surface, &table, cx, cy, dw, colour);
+                }
+                let rgb = palette.to_rgb(&surface);
+                let out = repo_root().join(format!("build/frame-{want}.ppm"));
+                write_ppm(&out, w, h, &rgb).expect("write ppm");
+                println!("frame {want}/{frame_count}: {nballs} balls -> {}", out.display());
+                break;
+            }
+        }
         "lnz" => {
             let path = args.get(1).expect("usage: petz-headless lnz FILE");
             let text = fs::read_to_string(path).expect("read lnz");

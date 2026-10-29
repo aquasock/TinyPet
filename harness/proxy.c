@@ -487,11 +487,30 @@ extern void serial_entry(void);
 extern void goal_entry(void);
 extern void frame_entry(void);
 extern void disp_entry(void);
+extern void fill2_entry(void);
+extern void fill3_entry(void);
+extern void fill4_entry(void);
+extern void fill5_entry(void);
+void *g_fill2_tramp = NULL, *g_fill3_tramp = NULL;
+void *g_fill4_tramp = NULL, *g_fill5_tramp = NULL;
 void *g_disp_tramp = NULL;
 static int g_disp_dumps = 0;
 
 void disp_probe(void *ballstates)
 {
+    /* Frame marker in the block ring: DisplayBallzFrame runs once per pet per
+     * frame, so this is the clean boundary the fill stream otherwise lacks. */
+    if (g_ring) {
+        LONG slot = InterlockedIncrement(&g_ring_pos) - 1;
+        if (slot < RING_RECS) {
+            unsigned char *rec = g_ring + (size_t)slot * RING_REC;
+            memset(rec, 0, RING_REC);
+            short sentinel = -1;
+            memcpy(rec + 4, &sentinel, 2);       /* colour field = -1 marks a frame */
+            DWORD marker = 0x4652414d;           /* 'M','A','R','F' */
+            memcpy(rec + 64, &marker, 4);
+        }
+    }
     if (!ballstates || g_disp_dumps >= 3) return;
     char name[48], *q = name;
     lstrcpyA(q, "ballstate-"); q += lstrlenA(q);
@@ -754,6 +773,31 @@ static void *install_inline_ex(DWORD rva, void *entry, const BYTE *expect, int e
 static void *install_inline(DWORD rva, void *entry, const BYTE *expect, int len)
 {
     return install_inline_ex(rva, entry, expect, len, len);
+}
+
+/* The body is drawn mostly through the non-rotated circle fills, not
+ * XFillRotatedCircle. All five take a CircleRenderBlock*, so they share the
+ * same probe. */
+static void install_other_circle_hooks(void)
+{
+    struct { const char *name; void *entry; void **tramp; int steal; } t[] = {
+        { "?XFillNormalCircle@XDrawPort@@QAEXPBVCircleRenderBlock@@@Z",
+          (void*)fill2_entry, &g_fill2_tramp, 8 },
+        { "?XFillEmbossCircle@XDrawPort@@QAEXPBVCircleRenderBlock@@@Z",
+          (void*)fill3_entry, &g_fill3_tramp, 5 },
+        { "?XFillOutlineCircle@XDrawPort@@QAEXPBVCircleRenderBlock@@@Z",
+          (void*)fill4_entry, &g_fill4_tramp, 5 },
+        { "?XFillCircleEx@XDrawPort@@QAE_NPAVCircleRenderBlock@@@Z",
+          (void*)fill5_entry, &g_fill5_tramp, 5 },
+    };
+    static const BYTE pre[2] = { 0x83, 0xEC };
+    for (int i = 0; i < 4; i++) {
+        void *fn = find_export(t[i].name);
+        if (!fn) { slog("circle hook: export not found"); continue; }
+        DWORD rva = (DWORD)fn - (DWORD)GetModuleHandleA(NULL);
+        *t[i].tramp = install_inline_ex(rva, t[i].entry, pre, 2, t[i].steal);
+        slog(*t[i].tramp ? "circle hook: installed" : "circle hook: prologue mismatch");
+    }
 }
 
 static void install_tex_hook(void)
@@ -1090,7 +1134,9 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
                       (void *)state_entry, &g_state_tramp, {0x8b,0x44,0x24,0x10} },
                 };
                 {
-                    void *fn = find_export("?GetRawFramePtr@XBallzData@@QAEPAUBallFrame@@J@Z");
+                    char fh[8];
+                    void *fn = GetEnvironmentVariableA("PETZ_FRAME_HOOK", fh, sizeof(fh)) > 0
+                        ? find_export("?GetRawFramePtr@XBallzData@@QAEPAUBallFrame@@J@Z") : NULL;
                     if (fn) {
                         static const BYTE pre[5] = {0x55,0x8B,0xEC,0x6A,0xFF};
                         DWORD rva = (DWORD)fn - (DWORD)GetModuleHandleA(NULL);
@@ -1120,7 +1166,12 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
             }
             if (GetEnvironmentVariableA("PETZ_FILL_HOOK", envbuf, sizeof(envbuf)) > 0) {
                 install_fill_hook();
-                install_tex_hook();
+                install_other_circle_hooks();
+                {
+                    char tx[8];
+                    if (GetEnvironmentVariableA("PETZ_TEX_HOOK", tx, sizeof(tx)) > 0)
+                        install_tex_hook();
+                }
             }
             else
                 slog("fill hook: disabled (set PETZ_FILL_HOOK=1 to enable)");

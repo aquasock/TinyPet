@@ -660,6 +660,37 @@ So textured fills are the norm, not an exception. The next step is to capture
 what that call *returns* (the texture base pointer) and the out-parameter row
 offset, which together give the mapping directly instead of by inference.
 
+### Animation: the render block stream
+
+**[verified]** Every ball is drawn through one of five `XDrawPort` circle fills
+(`XFillRotatedCircle`, `XFillNormalCircle`, `XFillEmbossCircle`,
+`XFillOutlineCircle`, `XFillCircleEx`), and all five receive a
+`CircleRenderBlock*`. Hooking only `XFillRotatedCircle` captures about one fifth
+of the drawing - the body uses the others.
+
+**[verified]** `CircleRenderBlock` fields, decoded by correlating thousands of
+captured records:
+
+```
++4    int16   palette index (colour)
++32   int16   rect left      +36  int16  rect top
++40   int16   rect right     +44  int16  rect bottom
++52   int16   angle-ish (signed, slow-varying)
++56   int16   small parameter
+```
+
+Every ball is emitted **twice** in a row (body then emboss), offset by roughly
+(+16, -7).
+
+**[verified]** Frame boundaries are not detectable from the fill stream itself -
+the number of fills per frame varies with culling. `XBallz::DisplayBallzFrame`
+runs once per pet per frame, so the shim writes a `MARF` marker record there.
+
+Capture from one session: 65,536 records, **741 frames**, 3-114 balls per frame
+(mean 46). `tools/export-frames.py` converts the ring to `animation.json` and a
+compact `animation.petz`; `petz-headless frame N` renders a frame with our own
+rasterizer.
+
 ## Oracle harness: what it took to get a stable frame
 **[verified]** These are hard-won operating facts. Each one cost a failed run.
 
