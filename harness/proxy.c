@@ -261,6 +261,36 @@ static HANDLE WINAPI hook_CreateDIBSection(HDC hdc, const BITMAPINFO *bmi, UINT 
     return r;
 }
 
+/* ------------------------------------------------------- file access trace */
+/* Answers "why is content missing?" with evidence: every failed open, logged
+ * with its path and error, instead of guessing at demo mode. */
+
+typedef HANDLE (WINAPI *pCreateFileA)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES,
+                                      DWORD, DWORD, HANDLE);
+static pCreateFileA real_CreateFileA = NULL;
+static volatile LONG g_missing = 0;
+
+static HANDLE WINAPI hook_CreateFileA(LPCSTR name, DWORD access, DWORD share,
+                                      LPSECURITY_ATTRIBUTES sa, DWORD disp,
+                                      DWORD flags, HANDLE tmpl)
+{
+    HANDLE h = real_CreateFileA ? real_CreateFileA(name, access, share, sa, disp, flags, tmpl)
+                                : INVALID_HANDLE_VALUE;
+    if (h == INVALID_HANDLE_VALUE && name && g_missing < 200) {
+        DWORD err = GetLastError();
+        /* Ignore the noise from probing for optional things in system dirs. */
+        char buf[300], *p = buf;
+        lstrcpyA(p, "missing: "); p += lstrlenA(p);
+        for (const char *q = name; *q && p < buf + 240; q++) *p++ = *q;
+        lstrcpyA(p, " err="); p += lstrlenA(p);
+        p = put_uint(p, (unsigned long)err);
+        *p = 0;
+        slog(buf);
+        InterlockedIncrement(&g_missing);
+    }
+    return h;
+}
+
 /* -------------------------------------------------------- surface lifetime */
 
 typedef BOOL (WINAPI *pDeleteObject)(HGDIOBJ);
@@ -709,6 +739,10 @@ static void install_hooks(void)
         real_CreatePalette = (pCreatePalette)GetProcAddress(gdi, "CreatePalette");
         real_DeleteObject = (pDeleteObject)GetProcAddress(gdi, "DeleteObject");
     }
+    {
+        HMODULE k32 = GetModuleHandleA("kernel32.dll");
+        if (k32) real_CreateFileA = (pCreateFileA)GetProcAddress(k32, "CreateFileA");
+    }
 
     int n = 0;
     n += patch_iat(exe, "winmm.dll", "timeGetTime", (void *)hook_timeGetTime);
@@ -720,6 +754,7 @@ static void install_hooks(void)
     n += patch_iat(exe, "gdi32.dll", "CreateDIBSection", (void *)hook_CreateDIBSection);
     n += patch_iat(exe, "gdi32.dll", "CreatePalette", (void *)hook_CreatePalette);
     n += patch_iat(exe, "gdi32.dll", "DeleteObject", (void *)hook_DeleteObject);
+    n += patch_iat(exe, "kernel32.dll", "CreateFileA", (void *)hook_CreateFileA);
 
     char buf[96], *p = buf;
     lstrcpyA(p, "hooks installed: "); p += lstrlenA(p);
