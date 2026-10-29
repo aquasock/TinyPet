@@ -147,6 +147,47 @@ pub fn draw_disc(
     }
 }
 
+/// A flat disc at a single depth. Used for rims: a backing plate just behind
+/// the ball, rather than a second sphere, because a sphere of a larger radius is
+/// *nearer* at the centre and at the rim alike and ends up winning everywhere.
+pub fn draw_flat_disc(
+    surface: &mut Surface,
+    depth: &mut DepthBuffer,
+    table: &SpanTable,
+    cx: i32,
+    cy: i32,
+    diameter: usize,
+    at_depth: f32,
+    colour: u8,
+    keep: &dyn Fn(i32, i32) -> bool,
+) {
+    let rows = table.rows(diameter);
+    if rows.is_empty() {
+        return;
+    }
+    let top = cy - (diameter as i32 - 1) / 2;
+    let (h, w) = (surface.height(), surface.width());
+    for (row, &width) in rows.iter().enumerate() {
+        if width == 0 {
+            continue;
+        }
+        let y = top + row as i32;
+        if y < 0 || y as usize >= h {
+            continue;
+        }
+        let left = cx - (width as i32 - 1) / 2;
+        for i in 0..width as i32 {
+            let x = left + i;
+            if x < 0 || x as usize >= w || !keep(x, y) {
+                continue;
+            }
+            if depth.test_and_set(x as usize, y as usize, at_depth) {
+                surface.set(x as usize, y as usize, colour);
+            }
+        }
+    }
+}
+
 /// A ring of `thickness` pixels inside a disc, depth-tested like any other
 /// geometry. Rims go through here so they cannot escape the depth buffer the
 /// way an unmasked ring escaped every clip we had before.

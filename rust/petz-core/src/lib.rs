@@ -18,7 +18,7 @@ pub use lnz::Lnz;
 pub use fur::{shade_disc_pattern, Pattern, Texture};
 pub use gait::{two_bone_ik, FootPose, Gait, GaitSpec};
 pub use project::{Body, Projected, Vec3, View};
-pub use raster::{draw_disc, draw_ring, DepthBuffer, Paint};
+pub use raster::{draw_disc, draw_flat_disc, draw_ring, DepthBuffer, Paint};
 pub use ragdoll::{Constraint, Particle, Ragdoll, Vec2};
 pub use shade::{shade_disc, Light, Ramp};
 pub use spans::{fill_disc, fill_disc_masked, fill_ring, fill_ring_masked, row_span, SpanTable};

@@ -31,7 +31,7 @@ use petz_core::gait::{two_bone_ik, Gait, GaitSpec};
 use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
 use petz_core::project::{Body, Projected, Vec3 as WVec3, View};
 use petz_core::shade::{Light, Ramp, Vec3};
-use petz_core::{draw_disc, draw_ring, DepthBuffer, Paint, Palette, SpanTable, Surface};
+use petz_core::{draw_disc, draw_flat_disc, draw_ring, DepthBuffer, Paint, Palette, SpanTable, Surface};
 use std::fs;
 use std::path::PathBuf;
 
@@ -1018,13 +1018,18 @@ fn main() -> Result<(), String> {
             let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
             let cd = screen[i].depth;
             if !p.no_rim {
-                // A filled disc just behind the body, not a ring. The body is
-                // nearer, so it covers the middle and the rim survives as the
-                // two-pixel annulus - with no rounding gap, which a ring drawn
-                // at its own radius keeps leaving.
+                // A filled disc behind the body, not a ring: the body is
+                // nearer, covers the middle, and the rim survives as the
+                // two-pixel annulus with no rounding gap.
+                //
+                // The push has to beat the radius difference, not be some flat
+                // epsilon. A disc of radius r+2 has its surface 2*nz nearer than
+                // one of radius r at the same centre, so anything under 2 lets
+                // the rim win across the whole ball - which is exactly what
+                // happened: the dog came out entirely in outline colour.
                 let rim = if p.rim == 0 { OUTLINE } else { p.rim };
-                draw_disc(&mut surface, &mut depth, &table, cx, cy,
-                    ((r * 2) + 4) as usize, cd, 1.0, Paint::Flat(rim), &|_, _| true);
+                draw_flat_disc(&mut surface, &mut depth, &table, cx, cy,
+                    ((r * 2) + 4) as usize, cd + 0.5, rim, &|_, _| true);
             }
             let pat = pattern_for(p.colour);
             draw_disc(&mut surface, &mut depth, &table, cx, cy, (r * 2) as usize, cd, 0.0,
