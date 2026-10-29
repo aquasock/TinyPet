@@ -61,6 +61,11 @@ pub struct Particle {
     /// Pinned particles ignore gravity and constraints. Grabbing a pet pins
     /// the particle under the cursor; that one pin is the whole grab mechanic.
     pub pinned: bool,
+    /// Where an animator wants this ball, if anything. A gait drives its feet
+    /// and spine this way; the tail and ears are left free so they swing.
+    pub target: Option<Vec2>,
+    /// How hard to chase `target`, 0..=1 per step.
+    pub follow: f32,
 }
 
 impl Particle {
@@ -71,6 +76,8 @@ impl Particle {
             radius,
             colour,
             pinned: false,
+            target: None,
+            follow: 0.0,
         }
     }
 
@@ -169,12 +176,46 @@ impl Ragdoll {
             self.solve_constraints();
         }
 
+        // Driven balls move last, so the pose wins over the springs. Driving
+        // before relaxation means every constraint pass drags the target back
+        // off its mark, and a planted foot ends up sliding.
+        self.drive();
+
         // 3. Resolve contacts and walls after the skeleton is coherent.
         if self.contact > 0.0 {
             self.solve_contacts();
         }
         if let Some((x0, y0, x1, y1)) = self.bounds {
             self.solve_walls(x0, y0, x1, y1);
+        }
+    }
+
+    /// Move driven particles a fraction of the way toward their targets.
+    fn drive(&mut self) {
+        for p in self.particles.iter_mut() {
+            if p.pinned {
+                continue;
+            }
+            if let Some(t) = p.target {
+                p.pos.x += (t.x - p.pos.x) * p.follow;
+                p.pos.y += (t.y - p.pos.y) * p.follow;
+            }
+        }
+    }
+
+    /// Point a ball at a place and a stiffness. `follow` of 1 snaps it there.
+    pub fn drive_to(&mut self, index: usize, target: Vec2, follow: f32) {
+        if let Some(p) = self.particles.get_mut(index) {
+            p.target = Some(target);
+            p.follow = follow.clamp(0.0, 1.0);
+        }
+    }
+
+    /// Stop driving everything - what grabbing a pet should do.
+    pub fn release_all(&mut self) {
+        for p in self.particles.iter_mut() {
+            p.target = None;
+            p.follow = 0.0;
         }
     }
 
