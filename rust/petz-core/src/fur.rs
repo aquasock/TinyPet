@@ -84,6 +84,22 @@ pub fn shade_disc_pattern(
     light: Light,
     pattern: &Pattern,
 ) {
+    shade_disc_pattern_masked(surface, table, cx, cy, diameter, light, pattern, &|_, _| true)
+}
+
+/// As `shade_disc_pattern`, but `keep` is asked about every pixel before it is
+/// written. Used to occlude one sphere against another per pixel, which a
+/// painter's algorithm cannot do by comparing centres alone.
+pub fn shade_disc_pattern_masked(
+    surface: &mut Surface,
+    table: &SpanTable,
+    cx: i32,
+    cy: i32,
+    diameter: usize,
+    light: Light,
+    pattern: &Pattern,
+    keep: &dyn Fn(i32, i32) -> bool,
+) {
     if diameter == 0 {
         return;
     }
@@ -122,6 +138,9 @@ pub fn shade_disc_pattern(
             // width: atan2 spans -pi/2..pi/2 on the front face.
             let u = ((dx.atan2(nz) * inv_pi) + 0.5 + pattern.phase).rem_euclid(1.0) * tw;
 
+            if !keep(x, y) {
+                continue;
+            }
             let texel = pattern.texture.sample(u as usize, v as usize);
             let ramp = if texel >= pattern.threshold { &pattern.base } else { &pattern.alt };
 

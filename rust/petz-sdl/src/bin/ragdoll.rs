@@ -25,7 +25,7 @@ use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use std::time::Instant;
 
-use petz_core::fur::{dapple, shade_disc_pattern, stripes, Pattern, Texture};
+use petz_core::fur::{dapple, shade_disc_pattern, shade_disc_pattern_masked, stripes, Pattern, Texture};
 use petz_core::gait::{two_bone_ik, Gait, GaitSpec};
 use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
 use petz_core::project::{Body, Projected, Vec3 as WVec3, View};
@@ -329,8 +329,8 @@ impl Walker {
             facing: vec![body.heading; particles],
             lag,
             walking: true,
-            eye_fwd: 394.0,
-            eye_out: 12.0,
+            eye_fwd: 404.0,
+            eye_out: 24.0,
         }
     }
 
@@ -815,52 +815,63 @@ fn main() -> Result<(), String> {
         // of the head. Testing "which side of the body" instead was wrong: it
         // hid *both* eyes when the animal faced the camera, where both should
         // be visible, and showed one even when it faced away.
-        let mut hidden: Vec<bool> = vec![false; doll.particles.len()];
-        let eye_h = walker.heading_body;
-        for &sclera in &creature.eyes {
-            // An eye is visible while it is on the viewer's side of the head.
-            // This has to be the horizontal offset only: comparing projected
-            // depth folds in the eye's height above the skull centre, which
-            // biased the test and pulled the far eye out about thirty degrees
-            // early.
-            let (eye, head) = (&doll.particles[sclera], &doll.particles[creature.skull]);
-            let dfwd = eye.pos.x - head.pos.x;
-            let dlat = eye.side - head.side;
-            // World y is "away from the viewer"; positive means behind the head.
-            let away = dfwd * eye_h.cos() - dlat * eye_h.sin();
-            if away >= 0.0 {
-                hidden[sclera] = true;
-                for &(base, over) in &creature.eye_overlays {
-                    if base == sclera {
-                        hidden[over] = true;
-                    }
-                }
-            }
-        }
+        // The eye sits on the surface of the head, so whether it is visible is
+        // a per-pixel question: compare the two spheres' surfaces, not their
+        // centres. A centre comparison either hides the eye far too early (the
+        // head's centre is a radius in front of its own surface) or, if
+        // corrected by sorting the eye in front, pops it out in a single frame
+        // when it finally goes behind. Comparing surfaces gives the crescent
+        // that shrinks as the eye rotates away, which is what it should be.
+        let skull = creature.skull;
+        let (sk_cx, sk_cy) = (screen[skull].x, screen[skull].y);
+        let sk_r = doll.particles[skull].radius.max(1.0);
+        let sk_depth = screen[skull].depth;
 
-        // An eye sits on the *surface* of the head, but sorting by ball centre
-        // compares the eye's centre with the skull's centre - and the skull is
-        // twenty-six pixels in radius, so its centre passes in front of the eye
-        // long before the eye is actually behind the head. That is what made it
-        // vanish early. Give the eye the skull's depth so it always draws just
-        // after the head it is attached to; anything genuinely nearer, like the
-        // muzzle, still covers it.
-        let mut sort_depth: Vec<f32> = screen.iter().map(|p| p.depth).collect();
-        for &sclera in &creature.eyes {
-            for &(base, over) in &creature.eye_overlays {
-                if base == sclera {
-                    sort_depth[over] = screen[creature.skull].depth - 0.5;
+        // Keep-closure per eye: true where this pixel of the eye is nearer than
+        // the head's surface at the same pixel.
+        let eye_h = walker.heading_body;
+        let eye_keep: std::collections::HashMap<usize, Box<dyn Fn(i32, i32) -> bool>> = creature
+            .eyes
+            .iter()
+            .map(|&sclera| {
+                // An eye on the far side of the head is not drawn at all, even
+                // though it can poke past the silhouette as a bump. Whether it
+                // faces the viewer is the world-space test; the per-pixel part
+                // below handles the crescent.
+                let sk = &doll.particles[skull];
+                let e = &doll.particles[sclera];
+                let away = (e.pos.x - sk.pos.x) * eye_h.cos() - (e.side - sk.side) * eye_h.sin();
+                if away >= 0.0 {
+                    return (sclera, Box::new(|_, _| false) as Box<dyn Fn(i32, i32) -> bool>);
                 }
-            }
-            sort_depth[sclera] = screen[creature.skull].depth - 0.5;
-        }
+                let p = &doll.particles[sclera];
+                let (ex, ey) = (screen[sclera].x, screen[sclera].y);
+                let re = p.radius.max(1.0);
+                let de = screen[sclera].depth;
+                let f = move |x: i32, y: i32| -> bool {
+                    let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                    let de2 = (fx - ex).powi(2) + (fy - ey).powi(2);
+                    let eye_surface = de - (re * re - de2).max(0.0).sqrt();
+                    let ds2 = (fx - sk_cx).powi(2) + (fy - sk_cy).powi(2);
+                    let skull_surface = if ds2 <= sk_r * sk_r {
+                        sk_depth - (sk_r * sk_r - ds2).max(0.0).sqrt()
+                    } else {
+                        f32::INFINITY
+                    };
+                    eye_surface < skull_surface
+                };
+                (sclera, Box::new(f) as Box<dyn Fn(i32, i32) -> bool>)
+            })
+            .collect();
+
+        let sort_depth: Vec<f32> = screen.iter().map(|p| p.depth).collect();
 
         let mut order: Vec<usize> = (0..doll.particles.len()).collect();
         order.sort_by(|&a, &b| sort_depth[b].partial_cmp(&sort_depth[a]).unwrap());
 
         // Rims for the body only. An iris rim drawn here would be painted over
         // by its own sclera, so it is drawn with the pair instead.
-        for &i in order.iter().filter(|&&i| !is_overlay(i) && !hidden[i]) {
+        for &i in order.iter().filter(|&&i| !is_overlay(i)) {
             let p = &doll.particles[i];
             let r = p.radius.round() as i32;
             if r < 1 { continue; }
@@ -889,14 +900,31 @@ fn main() -> Result<(), String> {
             shade_disc_pattern(surface, &table, cx, cy, (r * 2) as usize, light, &pattern);
         };
 
-        for &i in order.iter().filter(|&&i| !is_overlay(i) && !hidden[i]) {
-            draw(i, &mut surface);
+        for &i in order.iter().filter(|&&i| !is_overlay(i)) {
+            match eye_keep.get(&i) {
+                Some(keep) => {
+                    let p = &doll.particles[i];
+                    let r = p.radius.round() as i32;
+                    if r >= 1 {
+                        let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
+                        let alt = match p.colour { BODY => LIGHT, LIGHT => BODY, other => other };
+                        let pattern = Pattern {
+                            base: ramps.get(&p.colour).cloned().unwrap_or_else(|| Ramp::new(vec![p.colour])),
+                            alt: ramps.get(&alt).cloned().unwrap_or_else(|| Ramp::new(vec![alt])),
+                            texture: textures[tex_idx].1.clone(),
+                            threshold: 128,
+                            phase: 0.0,
+                        };
+                        shade_disc_pattern_masked(
+                            &mut surface, &table, cx, cy, (r * 2) as usize, light, &pattern, keep.as_ref(),
+                        );
+                    }
+                }
+                None => draw(i, &mut surface),
+            }
             // The pair is atomic: rim, body, then the pupil on top of it. It
             // still sorts by the sclera's depth, so the head can hide it.
             for over in overlays_for(i) {
-                if hidden[over] {
-                    continue;
-                }
                 let p = &doll.particles[over];
                 let r = p.radius.round() as i32;
                 if r >= 1 {
@@ -905,7 +933,27 @@ fn main() -> Result<(), String> {
                     let rim = if p.rim == 0 { OUTLINE } else { p.rim };
                     fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), rim);
                 }
-                draw(over, &mut surface);
+                match eye_keep.get(&i) {
+                    Some(keep) => {
+                        let r2 = p.radius.round() as i32;
+                        if r2 >= 1 {
+                            let (ox, oy) =
+                                (screen[over].x.round() as i32, screen[over].y.round() as i32);
+                            let alt2 = match p.colour { BODY => LIGHT, LIGHT => BODY, other => other };
+                            let pat2 = Pattern {
+                                base: ramps.get(&p.colour).cloned().unwrap_or_else(|| Ramp::new(vec![p.colour])),
+                                alt: ramps.get(&alt2).cloned().unwrap_or_else(|| Ramp::new(vec![alt2])),
+                                texture: textures[tex_idx].1.clone(),
+                                threshold: 128,
+                                phase: 0.0,
+                            };
+                            shade_disc_pattern_masked(
+                                &mut surface, &table, ox, oy, (r2 * 2) as usize, light, &pat2, keep.as_ref(),
+                            );
+                        }
+                    }
+                    None => draw(over, &mut surface),
+                }
             }
         }
 
@@ -1158,20 +1206,53 @@ mod walk_tests {
     }
 
     /// Frame the creature at a heading and report which eyes are visible.
+    ///
+    /// Uses the same test the renderer applies per pixel, evaluated at the
+    /// eye's centre: is the eye's surface nearer than the head's surface at
+    /// that point?
     fn visible_eyes(heading: f32) -> Vec<bool> {
-        let (doll, c, _rest, mut w) = rig();
+        // Settle first: the eye's runtime position comes from the tunables via
+        // pose(), not from where it was built.
+        let (mut doll, c, rest, mut w) = rig();
+        w.walking = false;
         w.body.heading = heading;
         w.heading_body = heading;
         for f in w.facing.iter_mut() {
             *f = heading;
         }
+        for _ in 0..90 {
+            w.pose(&mut doll, &c, &rest);
+            doll.step(1.0 / 120.0);
+        }
+        let view = View::new(25.0, GROUND);
+        let proj = |i: usize| {
+            let p = &doll.particles[i];
+            let b = Body { pos: w.body.pos, heading };
+            view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y))
+        };
+        let skull = proj(c.skull);
+        let sk_r = doll.particles[c.skull].radius.max(1.0);
         c.eyes
             .iter()
             .map(|&sclera| {
-                let (eye, head) = (&doll.particles[sclera], &doll.particles[c.skull]);
-                let dfwd = eye.pos.x - head.pos.x;
-                let dlat = eye.side - head.side;
-                dfwd * heading.cos() - dlat * heading.sin() < 0.0
+                // Same two tests the renderer applies: does it face the viewer,
+                // and is its surface nearer than the head's at that pixel.
+                let (sk_p, e_p) = (&doll.particles[c.skull], &doll.particles[sclera]);
+                let away = (e_p.pos.x - sk_p.pos.x) * heading.cos()
+                    - (e_p.side - sk_p.side) * heading.sin();
+                if away >= 0.0 {
+                    return false;
+                }
+                let e = proj(sclera);
+                let re = doll.particles[sclera].radius.max(1.0);
+                let eye_surface = e.depth - re;
+                let ds2 = (e.x - skull.x).powi(2) + (e.y - skull.y).powi(2);
+                let skull_surface = if ds2 <= sk_r * sk_r {
+                    skull.depth - (sk_r * sk_r - ds2).max(0.0).sqrt()
+                } else {
+                    f32::INFINITY
+                };
+                eye_surface < skull_surface
             })
             .collect()
     }
