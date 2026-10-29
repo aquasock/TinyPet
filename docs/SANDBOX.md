@@ -131,6 +131,42 @@ is asserted as a regression test.
 - **Physics is sagittal-only.** The solver runs in the animal's own plane;
   lateral offsets are authored, not simulated. A turning dog's tail swings
   fore-and-aft, not across the screen.
+- **The tail is one held ball and a free chain.** The root sits high on the
+  rump, above the line of the spine - a cat's tail leaves the body above the
+  anus, which is level - and is driven there at `follow = 0.25`. Every ball past
+  it (44-47) carries no target at all, so the chain dangles and can swing right
+  round the root. Left unanimated that reads as a broken tail: the shape is
+  right, what it needs is motion. Driving the chain made it a rigid rod; leaving
+  the root slack dropped the whole tail under the cat.
+- **Four claws a foot.** Black balls of radius 2 on the arc of radius
+  foot + claw, so each is tangent to the foot rather than buried in it, spread
+  across the toe at lateral +-9 and +-3 - the outer pair further back, because a
+  paw's toes wrap round the front of it. Placed by `pose()` rather than solved:
+  a tiny ball on a spring lags behind a foot that is being driven. No outline,
+  which on a 2 px ball would be most of the ball. They also ease their facing at
+  the same rate as the foot: every ball is projected with its own heading, and a
+  claw on the default rate swung out of the paw mid-turn.
+- **Rotation propagates down the body.** Each ball is projected with its own
+  eased heading, so a turn reaches the head before the tail. The time constant
+  is per part: head 0.11 s, spine 0.42 down to 0.24 front to back, knees 0.30,
+  feet 0.36, tail 0.50 and rising.
+
+  The hips are the exception and the reason this bit took three attempts: a hip
+  is not eased at all, it is *derived* at projection time from the spine ball it
+  hangs from - that ball's position, that ball's heading, plus the authored
+  offset. While it had its own heading, the spine ball swung and the hip did
+  not, and the leg tore away from the body; pinning it in body space made the
+  spine swing out from under it instead. Deriving it makes the weld exact, which
+  is also what lets the spine bend this much again. The spine ladder started
+  at 0.42-0.24 and was shortened after the rear of the body was measured
+  swinging 30 px on every turn; the hips swing with it, because that is what
+  being part of the body means. The steady-state error is turn
+  rate times lag, which means a ball far from the body's origin traces a wider
+  arc for the same lag - the hind hips sit 90 units out and swung twice as far
+  as the front pair. Reducing their lag helped but never finished the job, which
+  is the useful finding: a driven ball can only ever approach its target, so the
+  root of a limb has to be pinned, not driven. The hips are pinned and placed
+  exactly now; the sway lives in the knee and foot below them.
 - **Feet slide during a turn.** They are driven to body-space targets rather
   than stepping to new plants.
 

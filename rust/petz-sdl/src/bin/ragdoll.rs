@@ -95,6 +95,23 @@ const EAR_TIP_UP: f32 = 12.0;
 const EAR_TIP_SIZE: f32 = 6.5;
 const EAR_TIP_SINK: f32 = 0.20;
 
+/// The claw ball's radius. Small enough that four of them across a foot's toe
+/// are separate dots at 320x240 rather than one blob.
+const CLAW_RADIUS: f32 = 2.0;
+
+/// Where the four claws sit on a foot, forward then lateral from its centre.
+///
+/// On the arc of radius `foot + claw` about the foot's centre, so each claw is
+/// tangent to the foot rather than buried in it, and spread across the toe the
+/// way toes are spread. The outer pair sits further back than the inner pair
+/// for that reason: a paw's toes wrap round the front of it.
+const TOES: [(f32, f32); 4] = [
+    (7.9, -9.0),
+    (11.6, -3.0),
+    (11.6, 3.0),
+    (7.9, 9.0),
+];
+
 /// How far the front ear is pushed clear of the back one, in depth units.
 ///
 /// Two ears a couple of units apart interleave pixel by pixel, because a single
@@ -181,8 +198,22 @@ fn load_palette() -> Palette {
 /// One leg, by particle index.
 struct Leg {
     hip: usize,
+    /// The spine ball this leg hangs from, and the hip's offset from it. The hip
+    /// is pinned to *that ball*, not to a fixed point in body space: it has to
+    /// move with the body's own sway, or it sits still while the spine swings
+    /// and the leg looks torn off.
+    attach: usize,
+    offset: Vec2,
+    /// The hip's lateral offset from that spine ball. Kept separately because
+    /// the side axis is not in `offset`.
+    side_offset: f32,
     knee: usize,
     foot: usize,
+    /// Four tiny balls across the front of the foot: the claws, side by side
+    /// like toes. Each entry is the ball and its offset from the foot's centre,
+    /// forward then lateral. Placed by the pose, not solved, so they cannot lag
+    /// behind the foot they belong to.
+    claws: [(usize, f32, f32); 4],
     /// Which way the knee juts out from the hip-foot line. A dog's front legs
     /// bend backward and its hind legs forward.
     bend: f32,
@@ -372,9 +403,29 @@ fn build() -> (Ragdoll, Creature) {
     ];
     let mut legs = Vec::new();
     for (fwd, side, bend) in legs_spec {
-        let hip = r.add(Particle::new(fwd, GROUND - 48.0, 15.0, BODY));
+        // PETZ_DIAG paints the hips, which are otherwise coat colour and vanish
+        // into the body while you are trying to watch them turn.
+        let hip_col = if std::env::var("PETZ_DIAG").is_ok() { 143 } else { BODY };
+        let hip = r.add(Particle::new(fwd, GROUND - 48.0, 15.0, hip_col));
         let knee = r.add(Particle::new(fwd, GROUND - 22.0, 12.0, BODY));
         let foot = r.add(Particle::new(fwd, GROUND, 10.0, LIGHT));
+        // The claws: black against the white foot, small enough that an outline
+        // would be most of it, so they have none. Each sits on the arc that keeps
+        // it clear of the foot's own sphere - any closer and the foot's surface
+        // hides it - and the four are spread laterally, across the toe, the way
+        // toes are.
+        let mut claws = [(0usize, 0.0f32, 0.0f32); 4];
+        for (n, &(ahead, across)) in TOES.iter().enumerate() {
+            let claw = r.add(Particle::new(fwd + ahead, GROUND - 1.0, CLAW_RADIUS, DARK));
+            r.particles[claw].no_rim = true;
+            r.particles[claw].side = side + across;
+            r.particles[claw].rest_side = side + across;
+            claws[n] = (claw, ahead, across);
+        }
+        // The hip is part of the body, not a thing hanging off it. It is pinned
+        // and, at projection time, derived from the spine ball it hangs from -
+        // see the projection loop. The sway belongs to the leg below it.
+        r.particles[hip].pinned = true;
         for i in [hip, knee, foot] {
             r.particles[i].side = side;
             r.particles[i].rest_side = side;
@@ -383,18 +434,37 @@ fn build() -> (Ragdoll, Creature) {
         r.link(attach, hip);
         r.link(hip, knee);
         r.link(knee, foot);
-        legs.push(Leg { hip, knee, foot, bend, rest: Vec2::new(fwd, GROUND) });
+        for &(claw, _, _) in &claws {
+            r.link(foot, claw);
+        }
+        let offset = r.particles[hip].pos.sub(r.particles[attach].pos);
+        let side_offset = r.particles[hip].side - r.particles[attach].side;
+        legs.push(Leg {
+            hip,
+            attach,
+            offset,
+            side_offset,
+            knee,
+            foot,
+            claws,
+            bend,
+            rest: Vec2::new(fwd, GROUND),
+        });
     }
 
     // Tail: no target, so it swings with the body.
+    //
+    // Authored on the spine's own line; the pose lifts the root above it, the
+    // way a cat's tail leaves the body above the anus. Everything past the root
+    // is linked and left to gravity, which is what makes it dangle.
     let mut tail = Vec::new();
     let mut tail_prev = spine[0];
-    for i in 0..4 {
-        // Balls 27 and 29 white, the two alternate tail segments.
-        let tail_col = if i == 0 || i == 2 { LIGHT } else { BODY };
+    for i in 0..5 {
+        // Alternating: 43 white, 44 black, 45 white, 46 black, 47 white.
+        let tail_col = if i % 2 == 0 { LIGHT } else { BODY };
         let t = r.add(Particle::new(
             252.0 - i as f32 * 15.0,
-            base_y - 10.0,
+            base_y,
             10.0 - i as f32 * 1.2,
             tail_col,
         ));
@@ -467,15 +537,35 @@ impl Walker {
         }
         for (n, &i) in creature.spine.iter().enumerate() {
             // Front of the spine answers sooner than the back of it.
+            // Tighter than it was (0.42 down to 0.24): the rear of the body
+            // swung 30 px on every turn, and the hips welded to it swung with
+            // it. The order stays - the head leads, the tail trails - but the
+            // whole ladder is shorter, because sway is lag times distance and
+            // the rear ball is 90 units out.
+            // The ladder the turn travels down. It can be this long again
+            // because the hips no longer keep their own heading: each one is
+            // derived from the spine ball it hangs from, so the rear can swing
+            // without the legs tearing off it.
             lag[i] = 0.42 - 0.06 * n as f32;
         }
         for &i in &creature.head {
             lag[i] = 0.11;
         }
         for leg in &creature.legs {
-            lag[leg.hip] = 0.24;
+            // The hip rides on the spine ball it hangs from, so it has to ease
+            // at *that ball's* rate - not zero, and not its own. Any difference
+            // between the two is the gap that opens while the animal turns: the
+            // spine ball swings and the hip does not, and the leg tears away
+            // from the body.
+            lag[leg.hip] = lag[leg.attach];
             lag[leg.knee] = 0.30;
             lag[leg.foot] = 0.36;
+            // The claws are placed in the foot's own frame, so they have to ease
+            // at the same rate as it: any difference and the projection swings
+            // them out of the paw while the animal turns, then back.
+            for &(claw, _, _) in &leg.claws {
+                lag[claw] = lag[leg.foot];
+            }
         }
         for (n, &i) in creature.tail.iter().enumerate() {
             lag[i] = 0.50 + 0.08 * n as f32;
@@ -629,6 +719,21 @@ impl Walker {
             doll.set_rest(creature.skull, sclera, want);
         }
 
+        // Only the root of the tail is driven. Left entirely free the whole
+        // tail hangs straight down under the body, because that is what a chain
+        // does; one weak drive on the first ball holds the tail out behind, and
+        // the rest hang off it and swing.
+        // Only the root of the tail is held: it sits high on the rump, above
+        // the line of the spine, the way a cat's tail leaves the body. Every
+        // ball past it is a free link - no target at all - so the tail dangles
+        // like a chain and can swing right round the root. Left unanimated that
+        // looks like a broken tail; what it needs is motion, not a shape.
+        const ROOT_LIFT: f32 = 13.0;
+        if let Some(&root) = creature.tail.first() {
+            let home = Vec2::new(252.0, GROUND - 68.0 - ROOT_LIFT + lift);
+            doll.drive_to(root, home, 0.25);
+        }
+
         for (i, leg) in creature.legs.iter().enumerate() {
             let foot = if walking {
                 let f = self.gait.foot(i);
@@ -647,7 +752,24 @@ impl Walker {
             // keeps the legs from looking like rigid rods.
             doll.drive_to(leg.foot, foot, 1.0);
             doll.drive_to(leg.knee, knee, 0.85);
-            doll.drive_to(leg.hip, hip_target, 0.6);
+            // Exact, not driven, and anchored on the spine ball it hangs from:
+            // a driven hip lags the body through every turn, and a hip fixed in
+            // body space sits still while the spine sways - either way the leg
+            // reads as coming adrift.
+            let held = doll.particles[leg.attach].pos.add(leg.offset);
+            doll.drag_to(leg.hip, held);
+            doll.set_rest(leg.attach, leg.hip, leg.offset.length());
+            // The claws ride on the foot: forward of it and spread across its
+            // toe. Placed rather than solved - a tiny ball on a spring lags and
+            // jitters behind a foot that is being driven.
+            let heel = doll.particles[leg.foot].pos;
+            let s = doll.particles[leg.foot].side;
+            for &(claw, ahead, across) in &leg.claws {
+                doll.drag_to(claw, Vec2::new(heel.x + ahead, heel.y + 1.0));
+                if let Some(p) = doll.particles.get_mut(claw) {
+                    p.side = s + across;
+                }
+            }
         }
     }
 }
@@ -1131,8 +1253,9 @@ fn main() -> Result<(), String> {
 
         // Instrument: rotate steadily and stand still, so a sweep can be read
         // off the frame dump without touching the keyboard.
-        if std::env::var("PETZ_SWEEP").is_ok() {
-            walker.body.heading += 0.35 * frame_dt;
+        if let Ok(rate) = std::env::var("PETZ_SWEEP") {
+            let rate = rate.parse::<f32>().unwrap_or(0.35).max(0.02);
+            walker.body.heading += rate * frame_dt;
         }
         if let Ok(h) = std::env::var("PETZ_HEADING") {
             if let Ok(deg) = h.parse::<f32>() {
@@ -1178,13 +1301,23 @@ fn main() -> Result<(), String> {
         // the draw order: there is no z-buffer, only a painter.
         screen.clear();
         for (i, p) in doll.particles.iter().enumerate() {
-            let world = walker
-                .part(i)
-                .to_world(
-                    (p.pos.x - BODY_ORIGIN) * zoom,
-                    p.side * zoom,
-                    (GROUND - p.pos.y) * zoom,
-                );
+            // A hip is welded to its spine ball: derived here from that ball's
+            // live position and heading, so the gap cannot move at all. Placing
+            // it in the pose is not enough - the spine keeps moving inside the
+            // same step, after the placement.
+            let (pos, side, heading) = match creature.legs.iter().find(|l| l.hip == i) {
+                Some(leg) => (
+                    doll.particles[leg.attach].pos.add(leg.offset),
+                    doll.particles[leg.attach].side + leg.side_offset,
+                    leg.attach,
+                ),
+                None => (p.pos, p.side, i),
+            };
+            let world = walker.part(heading).to_world(
+                (pos.x - BODY_ORIGIN) * zoom,
+                side * zoom,
+                (GROUND - pos.y) * zoom,
+            );
             screen.push(view.project(world));
         }
 
@@ -1387,6 +1520,10 @@ fn main() -> Result<(), String> {
             println!("dump: {} balls, depth {:.0}..{:.0}, screen x {:.0}..{:.0} y {:.0}..{:.0}",
                 doll.particles.len(), dmin, dmax, xmin, xmax, ymin, ymax);
             if std::env::var("PETZ_DIAG").is_ok() {
+                for (i, p) in doll.particles.iter().enumerate() {
+                    println!("part {i:2} r{:5.1} colour {:3} at ({:.0},{:.0}) side {:5.1} screen ({:.1},{:.1})",
+                        p.radius, p.colour, p.pos.x, p.pos.y, p.side, screen[i].x, screen[i].y);
+                }
                 for &(base, tip, _) in &creature.ears {
                     for e in [base, tip] {
                         println!("dump ear {e:2} at ({:.1},{:.1}) r{:.1} depth {:.2} bias {:.2} cd {:.2}",
@@ -1817,7 +1954,7 @@ mod walk_tests {
         }
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
         assert_eq!(c.head.len(), 11, "skull, muzzle, nose, four ear balls, four eye balls");
-        assert_eq!(doll.particles.len(), 31, "total ball count");
+        assert_eq!(doll.particles.len(), 48, "total ball count: 32 plus sixteen claws");
     }
 
     #[test]
@@ -1962,6 +2099,128 @@ mod walk_tests {
 
 
     #[test]
+    fn every_foot_carries_four_claws() {
+        // Four claws a foot, side by side across the toe, each tangent to the
+        // foot's sphere - any closer and the foot's own surface covers it, any
+        // further and it floats. Black, tiny, and without an outline, because on
+        // a 3 px ball the outline would be most of the ball.
+        let (mut doll, c, rest, w) = rig();
+        assert_eq!(c.legs.len(), 4, "four feet");
+        for _ in 0..30 {
+            w.pose(&mut doll, &c, &rest);
+            doll.step(1.0 / 120.0);
+        }
+        w.pose(&mut doll, &c, &rest);
+        for leg in &c.legs {
+            let foot = &doll.particles[leg.foot];
+            let mut across: Vec<f32> = Vec::new();
+            for &(claw, ahead, side_off) in &leg.claws {
+                let claw = &doll.particles[claw];
+                assert_eq!(claw.colour, DARK, "claws are black");
+                assert!(claw.no_rim, "no outline on a claw");
+                assert!((claw.radius - CLAW_RADIUS).abs() < 0.001, "claw radius");
+                assert!(
+                    (claw.pos.x - (foot.pos.x + ahead)).abs() < 0.01,
+                    "claw x {:.2}",
+                    claw.pos.x - foot.pos.x
+                );
+                assert!((claw.pos.y - (foot.pos.y + 1.0)).abs() < 0.01, "claw y");
+                assert!(
+                    (claw.side - (foot.side + side_off)).abs() < 0.001,
+                    "claw stays on its own toe"
+                );
+                // Tangent in three dimensions, so the lateral offset counts: the
+                // outer claws sit further back because they sit further out.
+                let (dx, dy, dl) = (
+                    claw.pos.x - foot.pos.x,
+                    claw.pos.y - foot.pos.y,
+                    claw.side - foot.side,
+                );
+                let gap = (dx * dx + dy * dy + dl * dl).sqrt() - (claw.radius + foot.radius);
+                assert!(gap.abs() < 0.1, "claw is {gap:.2} from its foot");
+                across.push(claw.side);
+            }
+            across.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            assert_eq!(across.len(), 4, "four claws a foot");
+            let spread = across[3] - across[0];
+            assert!(spread > 2.0 * CLAW_RADIUS + 6.0, "claws are spread across the toe, not stacked: {spread:.1}");
+        }
+    }
+
+    #[test]
+    fn claws_ease_with_their_foot() {
+        // Reported from play: the claws flew off the paws mid-turn and came
+        // back. Each ball is projected with its own easing heading, and the
+        // claws were left on the default while their feet were slower - so the
+        // foot turned and the claw did not. They have to share the foot's rate.
+        let (mut doll, c, rest, mut w) = rig();
+        for leg in &c.legs {
+            for &(claw, _, _) in &leg.claws {
+                assert!(
+                    (w.lag[claw] - w.lag[leg.foot]).abs() < 1e-6,
+                    "claw eases at {:.2}, its foot at {:.2}",
+                    w.lag[claw],
+                    w.lag[leg.foot]
+                );
+            }
+        }
+        // Spin on the spot for a second, then check the headings still agree.
+        for _ in 0..120 {
+            w.advance(1.0 / 120.0, 0.0, 1.0);
+            w.pose(&mut doll, &c, &rest);
+            doll.step(1.0 / 120.0);
+        }
+        for leg in &c.legs {
+            for &(claw, _, _) in &leg.claws {
+                assert!(
+                    (w.facing[claw] - w.facing[leg.foot]).abs() < 1e-6,
+                    "claw faces {:.3} while its foot faces {:.3}",
+                    w.facing[claw],
+                    w.facing[leg.foot]
+                );
+            }
+        }
+    }
+
+
+    #[test]
+    fn the_hip_stays_welded_to_its_spine_ball_through_a_turn() {
+        // Reported from play, three times, and it had three causes in a row: the
+        // hip lagged on its own, then it was pinned to a fixed point in body
+        // space while the spine swung away from it, then it kept the body's
+        // heading while its spine ball eased. The hip is now *derived* at
+        // projection time from the spine ball it hangs from - position and
+        // heading both - so the weld is exact rather than approximate.
+        let (mut doll, c, rest, mut w) = rig();
+        for _ in 0..60 {
+            w.pose(&mut doll, &c, &rest);
+            doll.step(1.0 / 120.0);
+        }
+        let mut worst = vec![0.0f32; c.legs.len()];
+        for dir in [-1.0f32, 1.0] {
+            for _ in 0..180 {
+                w.advance(1.0 / 120.0, 0.0, dir);
+                w.pose(&mut doll, &c, &rest);
+                doll.step(1.0 / 120.0);
+                for (n, leg) in c.legs.iter().enumerate() {
+                    // What the renderer draws is derived from the attach ball, so
+                    // what can still go wrong is the solved position disagreeing
+                    // with that derivation - and the leg then tears at the joint.
+                    let a = &doll.particles[leg.attach];
+                    let h = &doll.particles[leg.hip];
+                    let drift = h.pos.sub(a.pos.add(leg.offset)).length();
+                    worst[n] = worst[n].max(drift);
+                }
+            }
+        }
+        for (n, d) in worst.iter().enumerate() {
+            assert!(*d < 2.5, "leg {n}'s hip drifts {d:.2} from its spine ball");
+        }
+    }
+
+
+
+    #[test]
     fn nearer_balls_are_drawn_last() {
         // Painter's order, keyed on depth: the far side of the body must be
         // drawn before the near side, or a dog walking away shows its chest
@@ -2057,18 +2316,42 @@ mod walk_tests {
     }
 
     #[test]
-    fn the_tail_is_left_to_physics() {
+    fn the_tail_root_holds_high_on_the_rump_and_the_rest_hangs_free() {
+        // Settled shape, after several attempts: one held ball and a free chain.
+        // The root sits high on the rump, above the line of the spine, the way a
+        // cat's tail leaves the body; every ball past it carries no target, so
+        // the chain dangles and can swing right round the root. Two failures
+        // this guards: a driven chain (a rigid rod) and a slack root (the tail
+        // drops under the cat).
         let (doll, c, _) = run(1.0);
-        // Tail balls are the last four particles and carry no target.
-        let n = doll.particles.len();
-        for i in (n - 4)..n {
-            assert!(doll.particles[i].target.is_none(), "tail ball {i} is being driven");
+        let root = c.tail[0];
+        assert!(doll.particles[root].follow > 0.0, "the tail root lost its drive");
+        assert!(
+            doll.particles[root].follow <= 0.5,
+            "the tail root is rigid: {}",
+            doll.particles[root].follow
+        );
+        for &i in &c.tail[1..] {
+            assert!(
+                doll.particles[i].target.is_none(),
+                "tail ball {i} should hang free"
+            );
+            assert!(doll.particles[i].pos.y > 0.0 && doll.particles[i].pos.y < 480.0);
         }
-        // ... and they should have settled somewhere plausible rather than run away.
-        for i in (n - 4)..n {
-            let p = doll.particles[i].pos;
-            assert!(p.y > 0.0 && p.y < 480.0, "tail ball {i} at {p:?}");
-        }
-        let _ = &c;
+        let rear = doll.particles[c.spine[0]].pos;
+        let root_pos = doll.particles[root].pos;
+        let tip = doll.particles[*c.tail.last().unwrap()].pos;
+        assert!(
+            root_pos.y < rear.y - 5.0,
+            "the tail root is not above the body axis"
+        );
+        assert!(root_pos.x < rear.x, "the tail root is not behind the rump");
+        // The free chain hangs below the root rather than standing out of it.
+        assert!(
+            tip.y > root_pos.y + 30.0,
+            "the chain does not hang: root {:.0}, tip {:.0}",
+            root_pos.y,
+            tip.y
+        );
     }
 }

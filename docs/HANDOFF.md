@@ -32,7 +32,7 @@ The shape of it:
 ## Verified, and how
 
 - `cargo test --workspace`: 62 tests, all green (39 core, 2 silhouette, 21 in
-  the sandbox binary). Counts test expects 31 balls, 11 on the head.
+  the sandbox binary). Counts test expects 48 balls, 11 on the head, sixteen claws, five tail balls.
 - Ear tips: given a diagnostic colour no body ramp can reach, the framebuffer
   was dumped at 0/90/180/270 and pixels counted - 304 of 308 expected head on,
   and the two tips share a screen x in profile. Colour set back to 100 after.
