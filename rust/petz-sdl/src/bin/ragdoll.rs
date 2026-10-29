@@ -206,6 +206,7 @@ fn build() -> (Ragdoll, Creature) {
     // *inside* the muzzle and the containment rule hides it, which is what
     // swallowed the black tip.
     let nose = r.add(Particle::new(420.0, base_y - 20.0, 5.0, DARK));
+    r.particles[nose].no_rim = true;
     r.link(neck, skull);
     r.link(skull, muzzle);
     r.link(muzzle, nose);
@@ -1035,6 +1036,7 @@ fn main() -> Result<(), String> {
                 continue; // inside another ball: no rim of its own
             }
             let p = &doll.particles[i];
+            if p.no_rim { continue; }
             let r = p.radius.round() as i32;
             if r < 1 { continue; }
             let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
