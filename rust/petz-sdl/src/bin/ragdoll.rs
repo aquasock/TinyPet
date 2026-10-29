@@ -1136,10 +1136,14 @@ fn main() -> Result<(), String> {
             let drop = walker.lid_drop.clamp(0.0, 1.0);
             let tilt = walker.lid_tilt;
             let line = re * (1.0 - 2.0 * drop);
+            // Fill out to the *rim's* radius, not the sphere's. Drawing the
+            // fill at the sphere radius and the rim two pixels outside it left a
+            // ring-shaped gap between them once rounding was accounted for.
+            let outer = re + 2.0;
             let lid_clip = move |x: i32, y: i32| -> bool {
                 let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
                 let (ux, uy) = (fx - cx, fy - cy);
-                if ux * ux + uy * uy > re * re {
+                if ux * ux + uy * uy > outer * outer {
                     return false;
                 }
                 if !inner_visible {
@@ -1155,12 +1159,13 @@ fn main() -> Result<(), String> {
             // reads as an eye, open or closed. Nothing is painted inside the
             // open half, so whatever is behind - the sphere, or the head -
             // shows through.
-            // A ring, not a disc: fill_disc here painted the whole eye dark.
-            fill_ring(&mut surface, &table, ix, iy,
-                (((re as i32 * 2) + 4) as usize).min(255), 2, OUTLINE);
+            // Fill first, out to the rim's radius, then the rim on top. The two
+            // are then guaranteed to meet.
             let lid_pattern = pattern_for(BODY);
             shade_disc_pattern_masked(&mut surface, &table, ix, iy,
-                (re as i32 * 2) as usize, light, &lid_pattern, &lid_clip);
+                (((re as i32 * 2) + 4) as usize).min(255), light, &lid_pattern, &lid_clip);
+            fill_ring(&mut surface, &table, ix, iy,
+                (((re as i32 * 2) + 4) as usize).min(255), 2, OUTLINE);
         }
 
         let rgb = palette.to_rgb(&surface);
