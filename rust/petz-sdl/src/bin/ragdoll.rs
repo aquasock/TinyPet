@@ -1115,9 +1115,20 @@ fn main() -> Result<(), String> {
         // as the head and invisible, and where the eye stands against something
         // else it is exactly the outline that should stay. That is what keeps
         // the eye from winking out of existence.
-        for &(sclera, _iris, _y, _sign) in &creature.eye_parts {
+        for &(sclera, iris, _y, _sign) in &creature.eye_parts {
             let sp = &doll.particles[sclera];
             let cp = &doll.particles[creature.skull];
+            // Everything except this eye's own two balls can hide the shell, so
+            // its outline stops showing through legs and the far side of the
+            // head. It is no longer drawn unconditionally on top: it is culled
+            // by the facing test no longer, but it is occluded like any ball.
+            let occluders: Vec<(f32, f32, f32, f32)> = (0..doll.particles.len())
+                .filter(|&i| i != sclera && i != iris)
+                .map(|i| {
+                    let p = &doll.particles[i];
+                    (screen[i].x, screen[i].y, p.radius.max(1.0), screen[i].depth)
+                })
+                .collect();
             // Is the inside of the eye actually there? Same test the sphere
             // uses: does it face the viewer?
             let eh = walker.facing.get(sclera).copied().unwrap_or(heading);
@@ -1140,10 +1151,17 @@ fn main() -> Result<(), String> {
             // fill at the sphere radius and the rim two pixels outside it left a
             // ring-shaped gap between them once rounding was accounted for.
             let outer = re + 2.0;
+            let lid_depth = screen[sclera].depth;
             let lid_clip = move |x: i32, y: i32| -> bool {
                 let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
                 let (ux, uy) = (fx - cx, fy - cy);
-                if ux * ux + uy * uy > outer * outer {
+                let d2 = ux * ux + uy * uy;
+                if d2 > outer * outer {
+                    return false;
+                }
+                // Hide the shell behind any ball whose surface is in front of
+                // the eye's at this pixel.
+                if !eye_pixel_ok(&occluders, fx, fy, lid_depth - (outer * outer - d2).max(0.0).sqrt(), 0.0) {
                     return false;
                 }
                 if !inner_visible {
