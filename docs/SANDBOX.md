@@ -143,8 +143,34 @@ The eye is built the way the original builds it: three nested shells, outside in
 That third point is the whole trick, and it is why the original's eyes never
 popped: the sphere's rim clips the pupil, rather than the head clipping the eye.
 
-Placement is by angle round the head (27 degrees) and radius (22) against an
-18-pixel cranium, with a depth bias in the eye's favour available on top.
+Placement is by angle round the head (27 degrees) and radius (31) against a
+26-pixel skull, with a depth bias in the eye's favour available on top. The eyes
+are **pinned** rather than simulated: left to the solver they drifted five
+pixels apart and one sat higher than the other.
+
+The eye is, as far as we can tell, finished. Live controls: `H`/`J` radius,
+`K`/`L` angle, `U`/`I` depth bias, `N`/`M` lid drop, `F`/`G` lid tilt.
+
+## Next: the nose
+
+What the breed data says, before any code:
+
+```
+;L nostril      244, 244, -1, 0, -3, -1, -1, 1     group -1
+;R nostril       15, 244, -1, 0, -3, -1, -1, 1     group -1
+;nose (bottom)  244, 244, -1, 0, -1, -5, -1, 1     group -1
+```
+
+Three balls, all in group -1 like the eyes, and the nose one is named
+"nose (bottom)" - so the visible nose is a ball at the underside of the snout
+with two nostril balls on it, not a flat marking. Both nostrils and the nose are
+white-outlined (outline colour 244 is black) with a thick outline type of -3 on
+the nostrils.
+
+Worth noting the asymmetry in the table: the left nostril is colour 244 (black)
+and the right one is colour 15 (a light grey). That is either a quirk of this
+breed file or a genuine difference in how the two are drawn, and it is the first
+thing to check against a capture.
 
 ## Reference findings worth keeping
 
