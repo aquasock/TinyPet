@@ -1114,9 +1114,24 @@ fn main() -> Result<(), String> {
             .chain(creature.eye_overlays.iter().map(|(_, o)| *o))
             .collect();
 
+        // ---- ears: only the near one ------------------------------------------
+        // In profile the two ears are 18 units apart in depth, which the pitched
+        // view turns into a ten-pixel difference in height - so the far ear
+        // peeks out behind the near one instead of hiding behind it. A dog in
+        // profile shows one ear; the far one is dropped once it is clearly round
+        // the far side, with a margin so both stay up when facing the camera.
+        let mut ear_hidden: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for &(base, tip, sign) in &creature.ears {
+            let outward = -walker.heading_body.sin() * sign;
+            if outward > 0.3 {
+                ear_hidden.insert(base);
+                ear_hidden.insert(tip);
+            }
+        }
+
         // ---- ordinary balls --------------------------------------------------
         for i in 0..doll.particles.len() {
-            if eye_set.contains(&i) {
+            if eye_set.contains(&i) || ear_hidden.contains(&i) {
                 continue;
             }
             let p = &doll.particles[i];
@@ -1642,6 +1657,20 @@ mod walk_tests {
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
         assert_eq!(c.head.len(), 11, "skull, muzzle, nose, four ear and four eye balls");
         assert_eq!(doll.particles.len(), 31, "total ball count");
+    }
+
+    #[test]
+    fn one_ear_shows_in_profile_and_two_facing_the_camera() {
+        // The far ear is dropped once it is clearly round the far side, with a
+        // margin so that both stay up when the animal faces the camera.
+        let visible = |deg: f32| {
+            let h = (deg as f32).to_radians();
+            [-1.0f32, 1.0].iter().filter(|&&sign| -h.sin() * sign <= 0.3).count()
+        };
+        assert_eq!(visible(90.0), 1, "profile shows one ear");
+        assert_eq!(visible(270.0), 1, "the other profile shows one ear");
+        assert_eq!(visible(180.0), 2, "facing the camera shows both");
+        assert_eq!(visible(0.0), 2, "facing away shows both");
     }
 
     #[test]
