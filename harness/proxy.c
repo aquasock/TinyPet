@@ -311,6 +311,58 @@ static HPALETTE WINAPI hook_CreatePalette(const LOGPALETTE *lp)
 
 /* ------------------------------------------------------- inline hook */
 
+extern void tex_entry(void);
+void *g_tex_tramp = NULL;
+static volatile LONG g_tex_calls = 0;
+
+void tex_probe(void *drawport, void *block)
+{
+    LONG n = InterlockedIncrement(&g_tex_calls);
+    if (n > 3) return;
+    char buf[128], *p = buf;
+    lstrcpyA(p, "tex#"); p += lstrlenA(p);
+    p = put_uint(p, (unsigned long)n);
+    lstrcpyA(p, " drawport="); p += lstrlenA(p);
+    p = put_hex64(p, (unsigned long long)(ULONG_PTR)drawport);
+    lstrcpyA(p, " block="); p += lstrlenA(p);
+    p = put_hex64(p, (unsigned long long)(ULONG_PTR)block);
+    *p = 0;
+    slog(buf);
+}
+
+/* Install a rel32 jump at rva, replaying `len` whole prologue bytes from a
+ * trampoline. Returns the trampoline pointer, or NULL if the bytes do not
+ * match (so we never patch a build we do not recognise). */
+static void *install_inline(DWORD rva, void *entry, const BYTE *expect, int len)
+{
+    BYTE *base = (BYTE *)GetModuleHandleA(NULL);
+    BYTE *fn = base + rva;
+    for (int i = 0; i < len; i++)
+        if (fn[i] != expect[i]) { slog("inline hook: prologue mismatch"); return NULL; }
+
+    BYTE *tramp = (BYTE *)VirtualAlloc(NULL, 64, MEM_COMMIT | MEM_RESERVE,
+                                       PAGE_EXECUTE_READWRITE);
+    if (!tramp) return NULL;
+    memcpy(tramp, fn, len);
+    tramp[len] = 0xE9;
+    *(DWORD *)(tramp + len + 1) = (DWORD)(fn + len) - (DWORD)(tramp + len + 5);
+
+    DWORD old;
+    if (!VirtualProtect(fn, 32, PAGE_EXECUTE_READWRITE, &old)) return NULL;
+    fn[0] = 0xE9;
+    *(DWORD *)(fn + 1) = (DWORD)entry - (DWORD)(fn + 5);
+    VirtualProtect(fn, 32, old, &old);
+    return tramp;
+}
+
+static void install_tex_hook(void)
+{
+    static const BYTE expect[8] = { 0x83,0xEC,0x24, 0x53, 0x8B,0x5C,0x24,0x2C };
+    g_tex_tramp = install_inline(0x39f10, (void *)tex_entry, expect, 8);
+    slog(g_tex_tramp ? "tex hook: installed at RVA 0x39f10"
+                     : "tex hook: not installed");
+}
+
 extern void fill_entry(void);
 void *fill_trampoline = NULL;
 
@@ -585,8 +637,10 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
          * only; enabled explicitly so a normal session runs untouched. */
         {
             char envbuf[8];
-            if (GetEnvironmentVariableA("PETZ_FILL_HOOK", envbuf, sizeof(envbuf)) > 0)
+            if (GetEnvironmentVariableA("PETZ_FILL_HOOK", envbuf, sizeof(envbuf)) > 0) {
                 install_fill_hook();
+                install_tex_hook();
+            }
             else
                 slog("fill hook: disabled (set PETZ_FILL_HOOK=1 to enable)");
         }

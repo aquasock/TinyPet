@@ -617,6 +617,22 @@ and deformations - while colour comes from the breed `BMP` plus `LNZ` fur
 info. If so, reproducing a ball needs three things: the span table (known), the
 per-frame geometry (BDT, not yet decoded), and the texture mapping (unknown).
 
+### Instrumenting the texture path
+
+**[verified]** The shim now installs a second inline hook, on
+`_initTextureDrawing` (RVA `0x39f10`, 8-byte prologue), and it fires on the
+title screen as well as in scenes:
+
+```
+fill hook: installed at RVA 0x3ad50
+tex hook:  installed at RVA 0x39f10
+tex#1 drawport=0x0875d438 block=0x0012f5bc
+```
+
+So textured fills are the norm, not an exception. The next step is to capture
+what that call *returns* (the texture base pointer) and the out-parameter row
+offset, which together give the mapping directly instead of by inference.
+
 ## Oracle harness: what it took to get a stable frame
 **[verified]** These are hard-won operating facts. Each one cost a failed run.
 

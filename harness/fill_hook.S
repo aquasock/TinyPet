@@ -32,3 +32,23 @@ _fill_entry:
     popfd
     popad
     jmp     dword ptr [_fill_trampoline]
+
+/* Second target: _initTextureDrawing (RVA 0x39f10). Prologue is 8 whole bytes:
+ *      83 EC 24        sub  esp,0x24
+ *      53              push ebx
+ *      8B 5C 24 2C     mov  ebx,[esp+0x2c]
+ * Used to observe when a fill is textured and which render block it belongs to.
+ */
+    .globl _tex_entry
+_tex_entry:
+    pushad
+    pushfd
+    mov     eax, dword ptr [esp+40]
+    mov     edx, dword ptr [esp+28]
+    push    eax
+    push    edx
+    call    _tex_probe
+    add     esp, 8
+    popfd
+    popad
+    jmp     dword ptr [_g_tex_tramp]
