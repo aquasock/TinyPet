@@ -159,8 +159,8 @@ struct Creature {
     skull: usize,
     /// The sclera of each eye, for the visibility test.
     eyes: Vec<usize>,
-    /// A second pair of eyes where the ears were: (sclera, iris, side sign).
-    ears: Vec<(usize, usize, f32)>,
+    /// The ear balls: (particle, side sign).
+    ears: Vec<(usize, f32)>,
     /// (sclera, iris, rest height, side sign) per eye, so the placement can be
     /// tuned while running instead of being baked in.
     eye_parts: Vec<(usize, usize, f32, f32)>,
@@ -238,27 +238,16 @@ fn build() -> (Ragdoll, Creature) {
     // buys a shape we do not need at this fidelity. The tip is deliberately not
     // driven - the solver gives it the flop for free, and it bounces with the
     // gait because the base hangs off the skull.
-    // Ears, built as an exact duplicate of an eye: same shells, same colours,
-    // same rules. The eye is the one part of this head that behaves at every
-    // angle, so the ears are not given their own construction.
-    let mut ear_parts: Vec<usize> = Vec::new();
-    let mut ear_eyes: Vec<(usize, usize, f32)> = Vec::new();
+    // Ears: one ordinary ball each, placed the way the eye experiment showed
+    // works - on the head's sphere by radius and two angles, pinned, unlinked,
+    // and drawn in front of the head. Everything learned, none of the eye.
+    let mut ear_eyes: Vec<(usize, f32)> = Vec::new();
     for side in [-1.0f32, 1.0] {
-        let sclera = r.add(Particle::new(390.0, base_y - 58.0, 10.0, SCLERA));
-        let iris = r.add(Particle::new(390.0, base_y - 57.0, 6.0, IRIS));
-        for i in [sclera, iris] {
-            r.particles[i].pinned = true;
-            r.particles[i].side = 10.0 * side;
-            r.particles[i].rest_side = 10.0 * side;
-        }
-        r.particles[iris].rim = IRIS_RING;
-        r.particles[iris].layer = 1;
-        // Deliberately unlinked. They are pinned and placed every frame, so a
-        // spring serves no purpose - and a pinned end pushes its whole
-        // correction into the other end, so the skull was being dragged around
-        // by the ears instead of the ears moving freely.
-        ear_parts.extend([sclera, iris]);
-        ear_eyes.push((sclera, iris, side));
+        let ear = r.add(Particle::new(390.0, base_y - 58.0, 10.0, EAR));
+        r.particles[ear].pinned = true;
+        r.particles[ear].side = 10.0 * side;
+        r.particles[ear].rest_side = 10.0 * side;
+        ear_eyes.push((ear, side));
     }
 
     // Pull the neck and head back into the body by a fifth. The compression is
@@ -266,7 +255,7 @@ fn build() -> (Ragdoll, Creature) {
     // simply sliding sideways through the chest.
     const SHOULDER: f32 = 332.0;
     let mut pulled: Vec<usize> = vec![spine[3], skull, muzzle, nose];
-    pulled.extend(ear_parts.iter().copied());
+    pulled.extend(ear_eyes.iter().map(|&(e, _)| e));
     for i in pulled {
         let p = &mut r.particles[i];
         p.pos.x = SHOULDER + 0.8 * (p.pos.x - SHOULDER);
@@ -350,7 +339,6 @@ fn build() -> (Ragdoll, Creature) {
     }
 
     let mut head = vec![skull, muzzle, nose];
-    head.extend(ear_parts.iter().copied());
     head.extend(eyes);
     (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eyes: eye_list, ears: ear_eyes, eye_parts, head_balls })
 }
@@ -538,13 +526,11 @@ impl Walker {
             let c = self.ear_width.cos();
             let bx = sk.x + self.ear_radius * self.ear_angle.sin() * c;
             let by = sk.y - self.ear_radius * self.ear_angle.cos() * c;
-            for &(sclera, iris, sign) in &creature.ears {
-                for i in [sclera, iris] {
-                    doll.drag_to(i, Vec2::new(bx, by));
-                    if let Some(p) = doll.particles.get_mut(i) {
-                        p.side = sign * self.ear_radius * self.ear_width.sin();
-                        p.z_bias = self.ear_bias;
-                    }
+            for &(ear, sign) in &creature.ears {
+                doll.drag_to(ear, Vec2::new(bx, by));
+                if let Some(p) = doll.particles.get_mut(ear) {
+                    p.side = sign * self.ear_radius * self.ear_width.sin();
+                    p.z_bias = self.ear_bias;
                 }
             }
         }
@@ -1110,7 +1096,6 @@ fn main() -> Result<(), String> {
             .iter()
             .copied()
             .chain(creature.eye_overlays.iter().map(|(_, o)| *o))
-            .chain(creature.ears.iter().flat_map(|&(s, i, _)| [s, i]))
             .collect();
 
         // ---- ordinary balls --------------------------------------------------
@@ -1147,7 +1132,6 @@ fn main() -> Result<(), String> {
         let (pc, ps) = (view.pitch.cos(), view.pitch.sin());
         let mut groups: Vec<(usize, usize)> =
             creature.eye_parts.iter().map(|&(s, i, _, _)| (s, i)).collect();
-        groups.extend(creature.ears.iter().map(|&(s, i, _)| (s, i)));
         groups.sort_by(|a, b| screen[b.0].depth.partial_cmp(&screen[a.0].depth).unwrap());
         for &(sclera, iris) in &groups {
             let sp = &doll.particles[sclera];
@@ -1638,14 +1622,14 @@ mod walk_tests {
         let (doll, c, _, _) = rig();
         let count = |colour: u8| doll.particles.iter().filter(|p| p.colour == colour).count();
         // The ears are a second pair of eyes, so four of each shell.
-        assert_eq!(count(SCLERA), 4, "sclerae");
-        assert_eq!(count(IRIS), 4, "pupils");
-        assert_eq!(count(EAR), 0, "no ear balls");
+        assert_eq!(count(SCLERA), 2, "sclerae");
+        assert_eq!(count(IRIS), 2, "pupils");
+        assert_eq!(count(EAR), 2, "ear balls");
         assert_eq!(count(EAR_TIP), 0, "no ear tips");
         assert_eq!(c.eyes.len(), 2, "two eyes");
         assert_eq!(c.ears.len(), 2, "two ear-eyes");
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
-        assert_eq!(c.head.len(), 11, "skull, muzzle, nose, four ear and four eye balls");
+        assert_eq!(c.head.len(), 7, "skull, muzzle, nose and four eye balls");
         assert_eq!(doll.particles.len(), 31, "total ball count");
     }
 
@@ -1685,7 +1669,7 @@ mod walk_tests {
             doll.step(1.0 / 120.0);
         }
         let sk = &doll.particles[c.skull];
-        for &(base, _tip, _) in &c.ears {
+        for &(base, _) in &c.ears {
             let p = &doll.particles[base];
             let (dx, dl, du) = (p.pos.x - sk.pos.x, p.side - sk.side, sk.pos.y - p.pos.y);
             let d = (dx * dx + dl * dl + du * du).sqrt();
@@ -1699,26 +1683,20 @@ mod walk_tests {
 
     #[test]
     fn the_two_ears_are_mirror_images() {
-        // Reported from play: the two tips leaned in different directions. The
-        // ears were being driven at 0.6 per step and then shoved by the solver,
-        // which settled them a couple of pixels apart. They are pinned now and
-        // placed exactly.
+        // Reported from play: the two ears leaned in different directions. They
+        // are pinned and placed exactly, so they are mirror images by
+        // construction rather than by the solver agreeing with itself.
         let (mut doll, c, rest, mut w) = rig();
         for _ in 0..180 {
             w.pose(&mut doll, &c, &rest);
             doll.step(1.0 / 120.0);
         }
-        let (b0, t0, _) = c.ears[0];
-        let (b1, t1, _) = c.ears[1];
-        for (name, a, b) in [("base", b0, b1), ("tip", t0, t1)] {
-            let (pa, pb) = (doll.particles[a].pos, doll.particles[b].pos);
-            assert!(
-                pa.sub(pb).length() < 0.01,
-                "{name} positions differ: {pa:?} vs {pb:?}"
-            );
-            let (sa, sb) = (doll.particles[a].side, doll.particles[b].side);
-            assert!((sa + sb).abs() < 0.01 && sa.abs() > 1.0, "{name} sides not mirrored");
-        }
+        let (e0, _) = c.ears[0];
+        let (e1, _) = c.ears[1];
+        let (pa, pb) = (doll.particles[e0].pos, doll.particles[e1].pos);
+        assert!(pa.sub(pb).length() < 0.01, "ear positions differ: {pa:?} vs {pb:?}");
+        let (sa, sb) = (doll.particles[e0].side, doll.particles[e1].side);
+        assert!((sa + sb).abs() < 0.01 && sa.abs() > 1.0, "ear sides not mirrored");
     }
 
     #[test]
