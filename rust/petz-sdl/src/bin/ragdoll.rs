@@ -377,17 +377,6 @@ struct Walker {
     lid_tilt: f32,
     /// How far above the skull's centre the eyes sit, in body units.
     eye_lift: f32,
-    /// Ears: angle round the skull from straight up, radius from its centre,
-    /// how far the tip sinks into the base, and their depth bias.
-    ear_angle: f32,
-    ear_radius: f32,
-    ear_sink: f32,
-    ear_bias: f32,
-    /// The lateral angle of each ear round the head's vertical axis. An angle,
-    /// not a distance: with a distance, changing the radius also changed the
-    /// direction from the head's centre, so the ear slid sideways instead of
-    /// out along its own ray.
-    ear_width: f32,
     /// Last movement input, so the pose knows whether to animate a gait.
     moving: f32,
 }
@@ -436,13 +425,6 @@ impl Walker {
             lid_drop: 0.26,
             lid_tilt: 0.23,
             eye_lift: 12.0,
-            // The values the ears were hand-placed at: 33 from the skull's
-            // centre, 14 degrees forward of straight up, tips sunk 35%.
-            ear_angle: -14.0_f32.to_radians(),
-            ear_radius: 30.0,
-            ear_sink: 0.35,
-            ear_bias: -30.0,
-            ear_width: 17.6_f32.to_radians(),
             moving: 1.0,
         }
     }
@@ -725,8 +707,7 @@ fn main() -> Result<(), String> {
     println!(
         "drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
          light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
-         ears: H/J radius, K/L angle, N/M width, PgUp/PgDn sink, U/I bias\n\
-         Tab: ball numbers\n\
+         Tab: ball numbers   P: settings\n\
          P: settings   R: reset   Space: pause   Esc: quit"
     );
     report(light, steps, tex_idx, textures[tex_idx].0);
