@@ -183,7 +183,8 @@ fn build() -> (Ragdoll, Creature) {
     // extra ball there put the head a body-length away from the shoulders and
     // the head read as detached.
     let spacing = 28.0;
-    let spine_r = [24.0, 23.0, 22.0, 20.0];
+    // The last of these is the neck; 20% down from where it was.
+    let spine_r = [24.0, 23.0, 22.0, 16.0];
     let mut spine = Vec::new();
     for i in 0..spine_r.len() {
         let fwd = 276.0 + i as f32 * spacing;
@@ -208,11 +209,13 @@ fn build() -> (Ragdoll, Creature) {
     let base_y = GROUND - 68.0;
     let neck = *spine.last().unwrap();
     let skull = r.add(Particle::new(386.0, base_y - 26.0, 26.0, BODY));
-    let muzzle = r.add(Particle::new(406.0, base_y - 16.0, 13.0, LIGHT));
+    // Out along the axis by 2 px, about 10% of its offset from the skull.
+    let muzzle = r.add(Particle::new(408.0, base_y - 16.0, 13.0, LIGHT));
     // Out on the tip, clear of the muzzle's own sphere. Closer in it counts as
     // *inside* the muzzle and the containment rule hides it, which is what
     // swallowed the black tip.
-    let nose = r.add(Particle::new(420.0, base_y - 20.0, 5.0, DARK));
+    // The nose rides on the muzzle, so it moves with it.
+    let nose = r.add(Particle::new(422.0, base_y - 20.0, 5.0, DARK));
     r.particles[nose].no_rim = true;
     r.link(neck, skull);
     r.link(skull, muzzle);
