@@ -412,6 +412,9 @@ static HPALETTE WINAPI hook_CreatePalette(const LOGPALETTE *lp)
 /* ------------------------------------------------------- inline hook */
 
 extern void tex_entry(void);
+extern void serial_entry(void);
+void *g_serial_tramp = NULL;
+static volatile LONG g_serial_calls = 0;
 extern void tex_post_entry(void);
 void *g_tex_ret = NULL;
 void *g_tex_out = NULL;      /* int* passed by the caller (row offset) */
@@ -430,6 +433,26 @@ void tex_probe(void *drawport, void *block)
     p = put_hex64(p, (unsigned long long)(ULONG_PTR)drawport);
     lstrcpyA(p, " block="); p += lstrlenA(p);
     p = put_hex64(p, (unsigned long long)(ULONG_PTR)block);
+    *p = 0;
+    slog(buf);
+}
+
+void serial_probe(const char *serial, int mode)
+{
+    LONG n = InterlockedIncrement(&g_serial_calls);
+    if (n > 6) return;
+    char buf[128], *p = buf;
+    lstrcpyA(p, "serial#"); p += lstrlenA(p);
+    p = put_uint(p, (unsigned long)n);
+    lstrcpyA(p, " mode="); p += lstrlenA(p);
+    p = put_uint(p, (unsigned long)mode);
+    lstrcpyA(p, " len="); p += lstrlenA(p);
+    p = put_uint(p, (unsigned long)(serial ? lstrlenA(serial) : 0));
+    lstrcpyA(p, " val=["); p += lstrlenA(p);
+    if (serial) {
+        for (int i = 0; i < 16 && serial[i]; i++) *p++ = serial[i];
+    }
+    *p++ = ']';
     *p = 0;
     slog(buf);
 }
@@ -490,6 +513,12 @@ static void install_tex_hook(void)
 {
     static const BYTE expect[8] = { 0x83,0xEC,0x24, 0x53, 0x8B,0x5C,0x24,0x2C };
     g_tex_tramp = install_inline(0x39f10, (void *)tex_entry, expect, 8);
+    {
+        static const BYTE sp[8] = { 0x83,0xEC,0x28, 0xA0,0x88,0x0B,0x64,0x00 };
+        g_serial_tramp = install_inline(0x615c0, (void *)serial_entry, sp, 8);
+        slog(g_serial_tramp ? "serial hook: installed at RVA 0x615c0"
+                            : "serial hook: not installed");
+    }
     slog(g_tex_tramp ? "tex hook: installed at RVA 0x39f10"
                      : "tex hook: not installed");
 }

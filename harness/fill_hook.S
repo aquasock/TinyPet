@@ -76,3 +76,19 @@ _tex_post_entry:
     popfd
     popad
     jmp     dword ptr [_g_tex_ret]
+
+/* Entry observation for XSecure::ValidRetailSerialNumber (RVA 0x615c0).
+ * Prologue: 83 EC 28 (sub esp,0x28) / A0 88 0B 64 00 (mov al,ds:0x640b88) = 8 bytes */
+    .globl _serial_entry
+_serial_entry:
+    pushad
+    pushfd
+    mov     eax, dword ptr [esp+40]      /* arg1: const char* serial */
+    mov     edx, dword ptr [esp+44]      /* arg2: ERunMode */
+    push    eax
+    push    edx
+    call    _serial_probe
+    add     esp, 8
+    popfd
+    popad
+    jmp     dword ptr [_g_serial_tramp]

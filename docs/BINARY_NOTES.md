@@ -9,6 +9,27 @@ claim is tagged:
 Keep that distinction. The whole project rests on not believing things we have
 not checked.
 
+## The shipped executable is the demo build
+
+**[verified]** `Petz 4.exe` reports `FileVersion 4.00.01` / `ProductVersion
+4.00.01` in its RT_VERSION resource, and its internal version string is
+`PFM_[V4.015]`. Both discs ship the **identical** binary
+(`6f11d4ffd630694096fe...`), and no other build exists on the media.
+
+Petz 4 shipped as a demo. The full game was unlocked by an official **Patch 4.2**
+(2002), which simply replaces `Petz 4.exe`. That is why:
+
+- the game runs with adoption kits greyed out and a "How to Order" entry
+- there are no serial numbers for Catz 4 / Dogz 4 (the community FAQ is right)
+- `XSecure::ValidRetailSerialNumber` exists anyway - it is shared code from
+  earlier products, still called at startup, but a 12-digit serial is not how
+  Petz 4 was unlocked
+
+**Consequence for this repo:** every address, capture and measurement in this
+document comes from the 4.00.01 demo executable. The 4.2 build will shift RVAs.
+The shim verifies prologue bytes before patching, so it fails safe on a
+different build rather than corrupting one - but the hooks must be re-targeted.
+
 ## Provenance
 
 | item | value |
