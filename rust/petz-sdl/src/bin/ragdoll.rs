@@ -394,7 +394,10 @@ struct Walker {
     ear_radius: f32,
     ear_sink: f32,
     ear_bias: f32,
-    /// How far apart the two ears sit, in body units.
+    /// The lateral angle of each ear round the head's vertical axis. An angle,
+    /// not a distance: with a distance, changing the radius also changed the
+    /// direction from the head's centre, so the ear slid sideways instead of
+    /// out along its own ray.
     ear_width: f32,
     /// Last movement input, so the pose knows whether to animate a gait.
     moving: f32,
@@ -450,7 +453,7 @@ impl Walker {
             ear_radius: 33.0,
             ear_sink: 0.35,
             ear_bias: -6.0,
-            ear_width: 10.0,
+            ear_width: 17.6_f32.to_radians(),
             moving: 1.0,
         }
     }
@@ -532,15 +535,14 @@ impl Walker {
         let skull_rest = rest.head[0];
         {
             let sk = doll.particles[creature.skull].pos;
-            let beta = (self.ear_width / self.ear_radius.max(1.0)).clamp(-1.0, 1.0).asin();
-            let c = beta.cos();
+            let c = self.ear_width.cos();
             let bx = sk.x + self.ear_radius * self.ear_angle.sin() * c;
             let by = sk.y - self.ear_radius * self.ear_angle.cos() * c;
             for &(sclera, iris, sign) in &creature.ears {
                 for i in [sclera, iris] {
                     doll.drag_to(i, Vec2::new(bx, by));
                     if let Some(p) = doll.particles.get_mut(i) {
-                        p.side = sign * self.ear_width;
+                        p.side = sign * self.ear_radius * self.ear_width.sin();
                         p.z_bias = self.ear_bias;
                     }
                 }
@@ -662,10 +664,10 @@ fn eye_pixel_ok(
 
 fn report_ears(w: &Walker) {
     println!(
-        "ears: angle {:.0} deg  radius {:.1}  width {:.1}  bias {:.1}",
+        "ears: angle {:.0} deg  radius {:.1}  width {:.0} deg  bias {:.1}",
         w.ear_angle.to_degrees(),
         w.ear_radius,
-        w.ear_width,
+        w.ear_width.to_degrees(),
         w.ear_bias
     );
 }
@@ -883,11 +885,11 @@ fn main() -> Result<(), String> {
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::N => {
-                        walker.ear_width = (walker.ear_width - 0.5).max(0.0);
+                        walker.ear_width = (walker.ear_width - 1.0_f32.to_radians()).max(0.0);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::M => {
-                        walker.ear_width = (walker.ear_width + 0.5).min(26.0);
+                        walker.ear_width = (walker.ear_width + 1.0_f32.to_radians()).min(1.4);
                         report_ears(&walker);
                     }
                     sdl2::keyboard::Keycode::U => {
@@ -1645,6 +1647,34 @@ mod walk_tests {
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
         assert_eq!(c.head.len(), 11, "skull, muzzle, nose, four ear and four eye balls");
         assert_eq!(doll.particles.len(), 31, "total ball count");
+    }
+
+    #[test]
+    fn changing_the_ear_radius_moves_it_straight_out() {
+        // Reported from play: H and J should move the ears radially out of the
+        // head. With the width as a distance they slid sideways as well.
+        let dir = |w: &Walker, doll: &Ragdoll, c: &Creature| {
+            let sk = &doll.particles[c.skull];
+            let p = &doll.particles[c.ears[0].0];
+            let v = (p.pos.x - sk.pos.x, p.side - sk.side, sk.pos.y - p.pos.y);
+            let len = (v.0 * v.0 + v.1 * v.1 + v.2 * v.2).sqrt().max(1e-6);
+            let _ = w;
+            (v.0 / len, v.1 / len, v.2 / len)
+        };
+        let mut dirs = Vec::new();
+        for radius in [20.0f32, 30.0, 45.0] {
+            let (mut doll, c, rest, mut w) = rig();
+            w.ear_radius = radius;
+            for _ in 0..120 {
+                w.pose(&mut doll, &c, &rest);
+                doll.step(1.0 / 120.0);
+            }
+            dirs.push(dir(&w, &doll, &c));
+        }
+        for d in &dirs[1..] {
+            let dot = d.0 * dirs[0].0 + d.1 * dirs[0].1 + d.2 * dirs[0].2;
+            assert!(dot > 0.999, "direction changed with radius: {d:?} vs {:?}", dirs[0]);
+        }
     }
 
     #[test]
