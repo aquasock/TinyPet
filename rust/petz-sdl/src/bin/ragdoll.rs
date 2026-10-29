@@ -297,6 +297,11 @@ struct Walker {
     /// tangent to the head and can never sink into it.
     eye_angle: f32,
     eye_radius: f32,
+    /// Depth bias in the eye's favour, in world units. The occlusion test is
+    /// "is the eye's surface nearer than the head's", and this moves the
+    /// threshold: higher keeps the eye visible a little longer, at the cost of
+    /// it occasionally winning against the head where it should not.
+    eye_bias: f32,
     /// Last movement input, so the pose knows whether to animate a gait.
     moving: f32,
 }
@@ -341,6 +346,7 @@ impl Walker {
             // round from straight ahead, at radius 31 against a head of 26.
             eye_angle: 27.0_f32.to_radians(),
             eye_radius: 31.0,
+            eye_bias: 1.5,
             moving: 1.0,
         }
     }
@@ -509,9 +515,10 @@ fn elevate_light(dir: Vec3, degrees: f32) -> Vec3 {
 
 fn report_eyes(w: &Walker) {
     println!(
-        "eyes: angle {:.0} deg  radius {:.1}",
+        "eyes: angle {:.0} deg  radius {:.1}  bias {:.1}",
         w.eye_angle.to_degrees(),
-        w.eye_radius
+        w.eye_radius,
+        w.eye_bias
     );
 }
 
@@ -692,6 +699,14 @@ fn main() -> Result<(), String> {
                     }
                     sdl2::keyboard::Keycode::J => {
                         walker.eye_radius = (walker.eye_radius + 1.0).min(60.0);
+                        report_eyes(&walker);
+                    }
+                    sdl2::keyboard::Keycode::U => {
+                        walker.eye_bias = (walker.eye_bias - 0.5).max(0.0);
+                        report_eyes(&walker);
+                    }
+                    sdl2::keyboard::Keycode::I => {
+                        walker.eye_bias = (walker.eye_bias + 0.5).min(12.0);
                         report_eyes(&walker);
                     }
                     sdl2::keyboard::Keycode::Z => {
@@ -889,6 +904,7 @@ fn main() -> Result<(), String> {
         // Keep-closure per eye: true where this pixel of the eye is nearer than
         // the head's surface at the same pixel.
         let eye_h = walker.heading_body;
+        let eye_bias = walker.eye_bias;
         let eye_keep: std::collections::HashMap<usize, Box<dyn Fn(i32, i32) -> bool>> = creature
             .eyes
             .iter()
@@ -917,7 +933,7 @@ fn main() -> Result<(), String> {
                     } else {
                         f32::INFINITY
                     };
-                    eye_surface < skull_surface
+                    eye_surface < skull_surface + eye_bias
                 };
                 (sclera, Box::new(f) as Box<dyn Fn(i32, i32) -> bool>)
             })
@@ -1297,7 +1313,7 @@ mod walk_tests {
                 } else {
                     f32::INFINITY
                 };
-                eye_surface < skull_surface
+                eye_surface < skull_surface + 1.5
             })
             .collect()
     }
