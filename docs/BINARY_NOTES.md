@@ -519,6 +519,17 @@ That is consistent with the on-screen measurement (smooth shade field plus
 per-pixel index detail) and it bounds the problem: the texture is small enough
 to be examined exhaustively.
 
+**[verified] Texture indices do not survive to the screen.** A breed texture is
+8bpp with ~225 distinct indices spanning 0-255 (index 253 dominant and
+transparent). The same breed rendered on screen shows **19** distinct indices in
+2..247, dominated by 14..19. Direct pixel correlation between texture and screen
+peaks at r=+0.22 over all cat breeds, i.e. no relationship.
+
+So the texture supplies *structure* and the colour is recomputed onto a ramp.
+That kills the naive "blit the fur texture" model and matches the exported fur
+API: `XFurInfo::SetRampBaseIndex`, `SetFurColor`, `ChangeFurColorArea`,
+`SetFurPatternAddball`.
+
 **[inferred]** The `BDT` payload is per-frame ball geometry - positions, sizes
 and deformations - while colour comes from the breed `BMP` plus `LNZ` fur
 info. If so, reproducing a ball needs three things: the span table (known), the
