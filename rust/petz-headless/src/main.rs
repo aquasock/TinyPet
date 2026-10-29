@@ -164,6 +164,8 @@ fn main() {
                 let v = u32::from_le_bytes(bytes[*p..*p+4].try_into().unwrap()); *p += 4; v
             };
             let _ver = rd_u32(&mut p);
+            let aw = rd_u32(&mut p) as usize;
+            let ah = rd_u32(&mut p) as usize;
             let frame_count = rd_u32(&mut p) as usize;
             let want: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(frame_count / 2);
             let want = want.min(frame_count.saturating_sub(1));
@@ -174,7 +176,7 @@ fn main() {
                 p += nballs * 12;
                 if idx != want { continue; }
 
-                let (w, h) = (640usize, 480usize);
+                let (w, h) = (aw, ah);
                 let mut surface = Surface::new(w, h);
                 for y in 0..h { for x in 0..w { surface.set(x, y, 12); } }
                 for b in 0..nballs {

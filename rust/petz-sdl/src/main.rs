@@ -21,6 +21,8 @@ fn repo_root() -> PathBuf {
 }
 
 struct Animation {
+    width: usize,
+    height: usize,
     frames: Vec<Vec<Ball>>,
 }
 
@@ -41,6 +43,8 @@ fn load_animation(path: &PathBuf) -> Animation {
     };
     let mut p = 4;
     let _version = rd(&mut p);
+    let width = rd(&mut p) as usize;
+    let height = rd(&mut p) as usize;
     let frame_count = rd(&mut p) as usize;
     let mut frames = Vec::with_capacity(frame_count);
     for _ in 0..frame_count {
@@ -56,7 +60,7 @@ fn load_animation(path: &PathBuf) -> Animation {
         }
         frames.push(balls);
     }
-    Animation { frames }
+    Animation { width, height, frames }
 }
 
 fn load_table() -> SpanTable {
@@ -80,14 +84,25 @@ fn main() -> Result<(), String> {
         return Err("build/animation.petz missing - run tools/export-frames.py".into());
     }
     let anim = load_animation(&anim_path);
+    let w = anim.width;
+    let h = anim.height;
     let table = load_table();
     let palette = load_palette();
     println!("loaded {} frames", anim.frames.len());
 
     let sdl = sdl2::init()?;
     let video = sdl.video()?;
+
+    // Largest integer scale that fits the display. Fractional scaling would
+    // resample pixels, which defeats the point.
+    let display = video.display_bounds(0)
+        .map(|r| (r.width() as usize, r.height() as usize))
+        .unwrap_or((1280, 720));
+    let scale = (display.0 / w).min(display.1 / h).max(1);
+    println!("display {:?}, scale {scale}", display);
+    let (ww, wh) = (w * scale, h * scale);
     let window = video
-        .window("petz", (W * 2) as u32, (H * 2) as u32)
+        .window("petz", ww as u32, wh as u32)
         .position_centered()
         .build()
         .map_err(|e| e.to_string())?;
@@ -97,7 +112,7 @@ fn main() -> Result<(), String> {
     println!("window size: {:?}", canvas.window().size());
     let tc = canvas.texture_creator();
     let mut tex = tc
-        .create_texture_streaming(sdl2::pixels::PixelFormatEnum::RGB24, W as u32, H as u32)
+        .create_texture_streaming(sdl2::pixels::PixelFormatEnum::RGB24, w as u32, h as u32)
         .map_err(|e| e.to_string())?;
     tex.set_scale_mode(sdl2::render::ScaleMode::Nearest);
 
@@ -117,9 +132,9 @@ fn main() -> Result<(), String> {
         }
 
         // Render at the game's resolution, then stretch with nearest filtering.
-        let mut surface = Surface::new(W, H);
-        for y in 0..H {
-            for x in 0..W {
+        let mut surface = Surface::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
                 surface.set(x, y, 12);
             }
         }
@@ -130,9 +145,11 @@ fn main() -> Result<(), String> {
             }
             fill_disc(&mut surface, &table, ball.cx, ball.cy, ball.w, ball.colour);
         }
+        let painted = surface.pixels().iter().filter(|&&p| p != 12).count();
+        if frame_idx % 30 == 0 { eprintln!("painted {painted} px on frame {frame_idx}"); }
         let rgb = palette.to_rgb(&surface);
 
-        tex.update(None, &rgb, W * 3).map_err(|e| e.to_string())?;
+        tex.update(None, &rgb, w * 3).map_err(|e| e.to_string())?;
         canvas.clear();
         canvas.copy(&tex, None, None).map_err(|e| e.to_string())?;
         canvas.present();

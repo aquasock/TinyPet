@@ -188,9 +188,11 @@ _disp_entry:
     pushad
     pushfd
     mov     eax, dword ptr [esp+48]      /* arg3: BallState* */
+    mov     edx, dword ptr [esp+28]      /* ecx: this (XBallz*) */
     push    eax
+    push    edx
     call    _disp_probe
-    add     esp, 4
+    add     esp, 8
     popfd
     popad
     jmp     dword ptr [_g_disp_tramp]

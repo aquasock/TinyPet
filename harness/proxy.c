@@ -396,7 +396,16 @@ static DWORD WINAPI profiler_thread(LPVOID unused)
 
     for (;;) {
         Sleep(5);
-        if (!g_do_sample) { flush_dispatch(); dump_ring(); continue; }   /* ~200 Hz: 1 kHz suspend/resume perturbed the target */
+        /* Flush at most every 5s. Doing it per tick (200 Hz) wrote megabytes
+         * of blocks.bin continuously and dropped the game to ~1 fps. */
+        if (!g_do_sample) {
+            if (GetTickCount() - last_flush > 5000) {
+                flush_dispatch();
+                dump_ring();
+                last_flush = GetTickCount();
+            }
+            continue;
+        }
         if (SuspendThread(h) == (DWORD)-1) continue;
         CONTEXT c;
         c.ContextFlags = CONTEXT_CONTROL;
@@ -496,7 +505,7 @@ void *g_fill4_tramp = NULL, *g_fill5_tramp = NULL;
 void *g_disp_tramp = NULL;
 static int g_disp_dumps = 0;
 
-void disp_probe(void *ballstates)
+void disp_probe(void *sprite, void *ballstates)
 {
     /* Frame marker in the block ring: DisplayBallzFrame runs once per pet per
      * frame, so this is the clean boundary the fill stream otherwise lacks. */
@@ -509,6 +518,8 @@ void disp_probe(void *ballstates)
             memcpy(rec + 4, &sentinel, 2);       /* colour field = -1 marks a frame */
             DWORD marker = 0x4652414d;           /* 'M','A','R','F' */
             memcpy(rec + 64, &marker, 4);
+            DWORD sp = (DWORD)(ULONG_PTR)sprite;
+            memcpy(rec + 68, &sp, 4);            /* which XBallz (which pet) */
         }
     }
     if (!ballstates || g_disp_dumps >= 3) return;
@@ -913,6 +924,16 @@ void fill_probe(void *drawport, void *block)
      * slog() here (CreateFile + WriteFile) crashed the retail game. */
 
     if (n == 1) dump_tables();
+
+    /* Legacy interval capture: diffs whole surfaces per fill. Only viable when
+     * the hook fires rarely (rotated circles). With all five circle fills
+     * hooked it costs seconds per frame, so it is opt-in. */
+    static int ballcap = -1;
+    if (ballcap < 0) {
+        char bc[8];
+        ballcap = GetEnvironmentVariableA("PETZ_BALLCAP", bc, sizeof(bc)) > 0 ? 1 : 0;
+    }
+    if (!ballcap) return;
 
     if (!g_have_prev) {
         for (int i = 0; i < g_surf_count; i++) snapshot_surface(i, &g_surf[i]);
