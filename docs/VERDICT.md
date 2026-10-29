@@ -128,5 +128,6 @@ Re-check the verdict without running the game:
 python3 tools/verify-evidence.py
 ```
 
-It verifies the frame hashes and re-derives the 285/285 silhouette result from
-the committed capture.
+It verifies the frame hashes, re-derives the 285/285 silhouette result, and
+checks the ramp claim - that consecutive palette indices cover most of a large
+ball and form a linear ramp.

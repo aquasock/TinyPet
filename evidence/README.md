@@ -15,6 +15,7 @@ python3 tools/verify-evidence.py
 |---|---|
 | `ball-input.raw` | One captured ball region: 896x736 8bpp surface, bounding box, palette, the `CircleRenderBlock` bytes as seen at call entry, and the surface **before** and **after** the fill. |
 | `tables.raw` | 32 KB read from the retail process at VA `0x63b458` — the static per-diameter row-width table. |
+| `living-room.raw` | Cropped capture from a live session (pet at full size, 2176x1336 surface, bbox 70x86). Same header, but stride == bbox width. This is the evidence for ramp shading. |
 | `shim.log` | Shim log from the run that produced the capture. |
 
 Layout of `ball-input.raw` (little endian):

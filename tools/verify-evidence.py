@@ -92,11 +92,62 @@ def check_ball():
                 f"{accounted}/{total} span pixels accounted for")
 
 
+def check_ramp():
+    """The living-room capture should show shading as a run of consecutive
+    palette indices, and those indices should be a linear ramp."""
+    path = os.path.join(EVID, "ball", "living-room.raw")
+    if not os.path.exists(path):
+        return False, "no evidence/ball/living-room.raw"
+    d = open(path, "rb").read()
+    (w, h, bpp, stride, minx, miny, bw, bh, changed, present) = struct.unpack_from(
+        "<IIIIIIIIII", d, 0)
+    pal = d[40:40 + 1024]
+    off = 40 + 1024 + 512
+    before = d[off:off + bw * bh]
+    after = d[off + bw * bh:off + bw * bh * 2]
+
+    counts = {}
+    for i in range(bw * bh):
+        if before[i] != after[i]:
+            counts[after[i]] = counts.get(after[i], 0) + 1
+    total = sum(counts.values())
+    if not total:
+        return False, "no pixels changed"
+
+    # longest run of consecutive indices
+    best_run, run = [], []
+    for v in sorted(counts):
+        if run and v == run[-1] + 1:
+            run.append(v)
+        else:
+            run = [v]
+        if len(run) > len(best_run):
+            best_run = list(run)
+    covered = sum(counts[v] for v in best_run)
+
+    # is that run a linear ramp in the palette?
+    def rgb(i):
+        return pal[i * 4], pal[i * 4 + 1], pal[i * 4 + 2]
+    cols = [rgb(v) for v in best_run]
+    monotonic = all(
+        all(cols[i + 1][c] <= cols[i][c] for c in range(3)) or
+        all(cols[i + 1][c] >= cols[i][c] for c in range(3))
+        for i in range(len(cols) - 1)
+    )
+
+    share = 100.0 * covered / total
+    ok = len(best_run) >= 4 and share >= 50 and monotonic
+    return ok, (f"dominant run {best_run[0]}..{best_run[-1]} covers "
+                f"{covered}/{total} px ({share:.0f}%), palette ramp "
+                f"{'linear' if monotonic else 'NOT linear'}")
+
+
 def main():
     quiet = "--quiet" in sys.argv
     results = []
     results.append(("frames", *check_frames()))
     results.append(("ball  ", *check_ball()))
+    results.append(("ramp  ", *check_ramp()))
 
     failed = False
     for name, ok, detail in results:
