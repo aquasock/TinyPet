@@ -21,10 +21,10 @@ from PIL import Image
 PATH = sys.argv[1] if len(sys.argv) > 1 else "build/install/ball-input.raw"
 raw = open(PATH, "rb").read()
 
-(w, h, bpp, stride, minx, miny, bw, bh, changed) = struct.unpack_from("<IIIIIIIII", raw, 0)
-pal = raw[36:36 + 1024]
-block = raw[36 + 1024:36 + 1024 + 512]
-off = 36 + 1024 + 512
+(w, h, bpp, stride, minx, miny, bw, bh, changed, present) = struct.unpack_from("<IIIIIIIIII", raw, 0)
+pal = raw[40:40 + 1024]
+block = raw[40 + 1024:40 + 1024 + 512]
+off = 40 + 1024 + 512
 need = stride * h
 before = raw[off:off + need]
 after = raw[off + need:off + need * 2]

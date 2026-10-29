@@ -40,7 +40,28 @@ unexplained:            0
 So a model of "look up row widths for diameter r, centre, fill" reproduces the
 ball completely.
 
-**4. The renderer is deterministic end to end.**
+**4. Large balls are shaded by palette-ramp offset, not float colour.**
+Captured from a live session (2176x1336 surface, pet at full size):
+
+```
+capture    bbox      distinct idx   dominant run
+living-15  70x86     19             14,15,16,17,18,19 = 81% of pixels
+living-18  77x121    51             46,47 + 81,82 + 15,16
+```
+
+Those consecutive indices are linear ramps in the palette:
+
+```
+12..19: (212,218,223) -> (182,190,195)   ~5 per index, each channel
+45..48: (122,162,187) -> (105,144,168)
+80..83: (1,41,168)    -> (1,38,155)
+```
+
+So the colour model is 8bpp with pre-baked ramps and shading is "base index
+plus an offset". The output of the lighting stage is an **integer index**, which
+is the difference between a port that can match and one that cannot.
+
+**5. The renderer is deterministic end to end.**
 Two cold runs from a restored prefix snapshot produced byte-identical output at
 three levels: whole frames (`f0a18ba4`, `08a01b15`, `c680379a`, `53536de2`), and
 a single captured ball (`2e2d1b47...`).
@@ -59,10 +80,13 @@ GPU feature dependence.
 
 ## Limits — what this does and does not establish
 
-- **Silhouette only.** The captured ball is a single flat index (18) plus an
-  overdraw edge (247). Larger balls, or balls at other poses, have not been
-  shown to be equally simple. Fur pattern, shading ramps and texture mapping
-  (`XFurInfo`, `SetBallTextureInfo`) are untouched.
+- **Shape verified on one small ball; colour verified only in outline.** The
+  285/285 silhouette result is a flat disc. Large balls are demonstrably
+  ramp-shaded and textured, but the *offset function* that chooses a ramp index
+  per pixel has not been derived. That function is where the remaining risk
+  sits, and it is likely the x87 setup arithmetic noted in BINARY_NOTES.
+- **Fur pattern mapping** (`XFurInfo`) and the texture path
+  (`SetBallTextureInfo`) remain unexamined beyond observing that they exist.
 - **Two balls per capture.** The isolation method diffs consecutive fills, and
   the interval held two overlapping balls. They separate cleanly by index, but
   no single isolated call has been captured.

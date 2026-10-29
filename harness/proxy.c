@@ -99,6 +99,7 @@ typedef struct {
     int   width, height, bpp, stride;
     int   has_pal;
     unsigned char pal[256 * 4];   /* RGBQUAD copy for 8bpp surfaces */
+    HBITMAP handle;               /* to invalidate on DeleteObject */
 } Surface;
 
 static Surface g_surf[MAX_SURFACES];
@@ -157,7 +158,7 @@ static void dump_surface(const Surface *s, long frame)
 static void note_present(const char *api, int cx, int cy)
 {
     LONG frame = InterlockedIncrement(&g_presents) - 1;
-    LONG clk = g_clock_calls;
+
 
     char buf[320], *p = buf;
     lstrcpyA(p, "present "); p += lstrlenA(p);
@@ -169,14 +170,15 @@ static void note_present(const char *api, int cx, int cy)
     *p++ = 'x';
     p = put_uint(p, (unsigned long)cy);
 
+    /* Do NOT read surface memory here. A surface recorded at
+     * CreateDIBSection time may have been deleted since, and hashing its
+     * bits() was crashing the game on a real desktop. Log geometry only. */
     for (int i = 0; i < g_surf_count; i++) {
         Surface *s = &g_surf[i];
         if (!s->bits || s->width != cx || s->height != cy) continue;
         lstrcpyA(p, " |"); p += lstrlenA(p);
         p = put_uint(p, (unsigned long)s->bpp);
-        lstrcpyA(p, "bpp="); p += lstrlenA(p);
-        p = put_hex64(p, fnv1a((const unsigned char *)s->bits,
-                               (size_t)s->stride * s->height));
+        lstrcpyA(p, "bpp"); p += lstrlenA(p);
     }
     *p = 0;
     if (frame < 3) slog(buf);
@@ -233,6 +235,7 @@ static HANDLE WINAPI hook_CreateDIBSection(HDC hdc, const BITMAPINFO *bmi, UINT 
         int bpp = bmi->bmiHeader.biBitCount;
         Surface *s = &g_surf[g_surf_count++];
         s->bits = *ppvBits;
+        s->handle = (HBITMAP)r;
         s->width = w;
         s->height = h;
         s->bpp = bpp;
@@ -256,6 +259,22 @@ static HANDLE WINAPI hook_CreateDIBSection(HDC hdc, const BITMAPINFO *bmi, UINT 
         slog(buf);
     }
     return r;
+}
+
+/* -------------------------------------------------------- surface lifetime */
+
+typedef BOOL (WINAPI *pDeleteObject)(HGDIOBJ);
+static pDeleteObject real_DeleteObject = NULL;
+
+static BOOL WINAPI hook_DeleteObject(HGDIOBJ obj)
+{
+    for (int i = 0; i < g_surf_count; i++) {
+        if (g_surf[i].handle && (HGDIOBJ)g_surf[i].handle == obj) {
+            g_surf[i].bits = NULL;      /* never touch this memory again */
+            g_surf[i].handle = NULL;
+        }
+    }
+    return real_DeleteObject ? real_DeleteObject(obj) : TRUE;
 }
 
 /* ------------------------------------------------------------- palette */
@@ -300,7 +319,7 @@ static unsigned char *g_prev[MAX_SURFACES];
 static int g_have_prev = 0;
 static int g_written = 0;
 static int g_seq = 0;
-#define MAX_SEQ 6
+#define MAX_SEQ 24   /* ring buffer: always the most recent N draws */
 static unsigned char g_block[512];
 static int g_block_len = 0;
 
@@ -381,7 +400,7 @@ void fill_probe(void *drawport, void *block)
 
     /* Compare against the previous fill's snapshot: whatever moved is what that
      * fill drew (fills are sparse, so contamination is minimal). */
-    if (g_seq < MAX_SEQ) {
+    {   /* ring buffer: always record, slot index wraps */
         int best = -1; long best_changed = 0;
         int bminx = 0, bminy = 0, bmaxx = 0, bmaxy = 0;
         for (int i = 0; i < g_surf_count; i++) {
@@ -392,22 +411,37 @@ void fill_probe(void *drawport, void *block)
                 bminx = minx; bminy = miny; bmaxx = maxx; bmaxy = maxy;
             }
         }
-        if (best >= 0 && best_changed > 0) {
+        if (best >= 0) {
+            char lb[160], *lq = lb;
+            lstrcpyA(lq, "fill interval: "); lq += lstrlenA(lq);
+            lq = put_uint(lq, (unsigned long)best_changed);
+            lstrcpyA(lq, " px, bbox "); lq += lstrlenA(lq);
+            lq = put_uint(lq, (unsigned long)(bmaxx - bminx + 1)); *lq++ = 'x';
+            lq = put_uint(lq, (unsigned long)(bmaxy - bminy + 1));
+            lstrcpyA(lq, " at "); lq += lstrlenA(lq);
+            lq = put_uint(lq, (unsigned long)bminx); *lq++ = ',';
+            lq = put_uint(lq, (unsigned long)bminy);
+            *lq = 0;
+            slog(lb);
+        }
+        /* Only keep substantial draws: startup floods the budget with tiny
+         * cursor/title fills. 1500 px is comfortably above a small disc. */
+        if (best >= 0 && best_changed >= 1500) {
             Surface *s = &g_surf[best];
             size_t bytes = (size_t)s->stride * s->height;
             char fname[64], *fp = fname;
             lstrcpyA(fp, "ball-input-"); fp += lstrlenA(fp);
-            fp = put_uint(fp, (unsigned long)g_seq);
+            fp = put_uint(fp, (unsigned long)(g_seq % MAX_SEQ));
             lstrcpyA(fp, ".raw"); fp += lstrlenA(fp);
             *fp = 0;
             HANDLE f = CreateFileA(fname, GENERIC_WRITE, 0, NULL,
                                    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
             if (f != INVALID_HANDLE_VALUE) {
-                DWORD w, hdr[9] = {
+                DWORD w, hdr[10] = {
                     (DWORD)s->width, (DWORD)s->height, (DWORD)s->bpp,
                     (DWORD)s->stride, (DWORD)bminx, (DWORD)bminy,
                     (DWORD)(bmaxx - bminx + 1), (DWORD)(bmaxy - bminy + 1),
-                    (DWORD)best_changed
+                    (DWORD)best_changed, (DWORD)g_fill_calls
                 };
                 WriteFile(f, hdr, sizeof(hdr), &w, NULL);
                 if (s->has_pal) WriteFile(f, s->pal, 256 * 4, &w, NULL);
@@ -520,6 +554,7 @@ static void install_hooks(void)
         real_StretchBlt = (pStretchBlt)GetProcAddress(gdi, "StretchBlt");
         real_CreateDIBSection = (pCreateDIBSection)GetProcAddress(gdi, "CreateDIBSection");
         real_CreatePalette = (pCreatePalette)GetProcAddress(gdi, "CreatePalette");
+        real_DeleteObject = (pDeleteObject)GetProcAddress(gdi, "DeleteObject");
     }
 
     int n = 0;
@@ -531,6 +566,7 @@ static void install_hooks(void)
     n += patch_iat(exe, "gdi32.dll", "StretchBlt", (void *)hook_StretchBlt);
     n += patch_iat(exe, "gdi32.dll", "CreateDIBSection", (void *)hook_CreateDIBSection);
     n += patch_iat(exe, "gdi32.dll", "CreatePalette", (void *)hook_CreatePalette);
+    n += patch_iat(exe, "gdi32.dll", "DeleteObject", (void *)hook_DeleteObject);
 
     char buf[96], *p = buf;
     lstrcpyA(p, "hooks installed: "); p += lstrlenA(p);
