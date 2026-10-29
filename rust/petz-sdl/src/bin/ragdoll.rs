@@ -159,8 +159,8 @@ struct Creature {
     skull: usize,
     /// The sclera of each eye, for the visibility test.
     eyes: Vec<usize>,
-    /// The ear balls, an ordinary body segment.
-    ears: Vec<usize>,
+    /// The ear balls: (base, tip, side sign).
+    ears: Vec<(usize, usize, f32)>,
     /// (sclera, iris, rest height, side sign) per eye, so the placement can be
     /// tuned while running instead of being baked in.
     eye_parts: Vec<(usize, usize, f32, f32)>,
@@ -234,22 +234,23 @@ fn build() -> (Ragdoll, Creature) {
 
     let head_balls = vec![skull, muzzle, nose];
 
-    // Ears: a base and a tip each. Two balls, because the retail ear is six and
-    // buys a shape we do not need at this fidelity. The tip is deliberately not
-    // driven - the solver gives it the flop for free, and it bounces with the
-    // gait because the base hangs off the skull.
-    // Ears: an ordinary body segment, in roughly the right place. A ball, a
-    // spring to the skull, drawn like every other ball. No pinning, no bias, no
-    // placement code.
-    let mut ear_balls: Vec<usize> = Vec::new();
+    // Ears: a base and a tip each, an ordinary body segment in everything but
+    // placement. Two balls, because the retail ear is six and buys a shape we
+    // do not need at this fidelity. Both are pinned and placed by the pose, and
+    // both take the head's depth in the render loop, so the head's outline does
+    // not run across them. The tip is the lighter ball.
+    let mut ear_balls: Vec<(usize, usize, f32)> = Vec::new();
     for side in [-1.0f32, 1.0] {
-        let ear = r.add(Particle::new(378.0, base_y - 58.0, 10.0, EAR));
-        // Pinned: the pair is placed as a billboard every frame, so a spring has
-        // nothing to do and would only pull the head about.
-        r.particles[ear].pinned = true;
-        r.particles[ear].side = 10.0 * side;
-        r.particles[ear].rest_side = 10.0 * side;
-        ear_balls.push(ear);
+        let base = r.add(Particle::new(378.0, base_y - 58.0, 10.0, EAR));
+        let tip = r.add(Particle::new(368.0, base_y - 72.0, 7.0, EAR_TIP));
+        // Pinned and placed every frame, like everything else on the head that
+        // the pose owns. A spring would only pull the skull about.
+        for i in [base, tip] {
+            r.particles[i].pinned = true;
+            r.particles[i].side = 10.0 * side;
+            r.particles[i].rest_side = 10.0 * side;
+        }
+        ear_balls.push((base, tip, side));
     }
 
     // Pull the neck and head back into the body by a fifth. The compression is
@@ -257,7 +258,8 @@ fn build() -> (Ragdoll, Creature) {
     // simply sliding sideways through the chest.
     const SHOULDER: f32 = 332.0;
     let mut pulled: Vec<usize> = vec![spine[3], skull, muzzle, nose];
-    pulled.extend(ear_balls.iter().copied());
+    pulled.extend(ear_balls.iter().map(|&(b, _, _)| b));
+    pulled.extend(ear_balls.iter().map(|&(_, t, _)| t));
     for i in pulled {
         let p = &mut r.particles[i];
         p.pos.x = SHOULDER + 0.8 * (p.pos.x - SHOULDER);
@@ -274,8 +276,6 @@ fn build() -> (Ragdoll, Creature) {
     // pupil whose *outline* is the iris, in a per-breed colour. There is no
     // eyelid ball at all - Petz parameterises the lid instead.
     //
-    // No ears for now: they sit where they can cover the eye in profile, and
-    // until the eyes are right we cannot tell what is hiding what.
     let mut eyes = Vec::new();
     let mut overlay_pairs: Vec<(usize, usize)> = Vec::new();
     let mut eye_list: Vec<usize> = Vec::new();
@@ -341,7 +341,8 @@ fn build() -> (Ragdoll, Creature) {
     }
 
     let mut head = vec![skull, muzzle, nose];
-    head.extend(ear_balls.iter().copied());
+    head.extend(ear_balls.iter().map(|&(b, _, _)| b));
+    head.extend(ear_balls.iter().map(|&(_, t, _)| t));
     head.extend(eyes);
     (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eyes: eye_list, ears: ear_balls, eye_parts, head_balls })
 }
@@ -513,11 +514,13 @@ impl Walker {
         {
             let sk = doll.particles[creature.skull].pos;
             const SEP: f32 = 10.0;
-            for (k, &ear) in creature.ears.iter().enumerate() {
-                let s = if k == 0 { -1.0 } else { 1.0 };
-                doll.drag_to(ear, Vec2::new(sk.x - 8.0, sk.y - 30.0));
-                if let Some(p) = doll.particles.get_mut(ear) {
-                    p.side = s * SEP;
+            for &(base, tip, s) in &creature.ears {
+                doll.drag_to(base, Vec2::new(sk.x - 8.0, sk.y - 30.0));
+                doll.drag_to(tip, Vec2::new(sk.x - 18.0, sk.y - 44.0));
+                for i in [base, tip] {
+                    if let Some(p) = doll.particles.get_mut(i) {
+                        p.side = s * SEP;
+                    }
                 }
             }
         }
@@ -1044,10 +1047,12 @@ fn main() -> Result<(), String> {
         // The eyes are exempt: their outline is supposed to sit on the head.
         {
             let sk_depth = screen[creature.skull].depth;
-            for &ear in &creature.ears {
-                let d = screen[ear].depth;
-                if let Some(p) = doll.particles.get_mut(ear) {
-                    p.z_bias = (sk_depth - 1.0) - d;
+            for &(base, tip, _) in &creature.ears {
+                for ear in [base, tip] {
+                    let d = screen[ear].depth;
+                    if let Some(p) = doll.particles.get_mut(ear) {
+                        p.z_bias = (sk_depth - 1.0) - d;
+                    }
                 }
             }
         }
@@ -1575,16 +1580,15 @@ mod walk_tests {
         // came out with four of everything.
         let (doll, c, _, _) = rig();
         let count = |colour: u8| doll.particles.iter().filter(|p| p.colour == colour).count();
-        // The ears are a second pair of eyes, so four of each shell.
         assert_eq!(count(SCLERA), 2, "sclerae");
         assert_eq!(count(IRIS), 2, "pupils");
-        assert_eq!(count(EAR), 2, "ear balls");
-        assert_eq!(count(EAR_TIP), 0, "no ear tips");
+        assert_eq!(count(EAR), 2, "ear bases");
+        assert_eq!(count(EAR_TIP), 2, "ear tips");
         assert_eq!(c.eyes.len(), 2, "two eyes");
-        assert_eq!(c.ears.len(), 2, "two ear-eyes");
+        assert_eq!(c.ears.len(), 2, "two ears, each base plus tip");
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
-        assert_eq!(c.head.len(), 9, "skull, muzzle, nose, two ears, four eyes");
-        assert_eq!(doll.particles.len(), 29, "total ball count");
+        assert_eq!(c.head.len(), 11, "skull, muzzle, nose, four ear balls, four eye balls");
+        assert_eq!(doll.particles.len(), 31, "total ball count");
     }
 
     #[test]
@@ -1604,23 +1608,28 @@ mod walk_tests {
                 w.pose(&mut doll, &c, &rest);
                 doll.step(1.0 / 120.0);
             }
-            let pts: Vec<(f32, f32)> = c
+            let at = |i: usize| {
+                let p = &doll.particles[i];
+                let b = Body { pos: w.body.pos, heading: w.body.heading };
+                let s = view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y));
+                (s.x, s.y)
+            };
+            let pts: Vec<((f32, f32), (f32, f32))> = c
                 .ears
                 .iter()
-                .map(|&e| {
-                    let p = &doll.particles[e];
-                    let b = Body { pos: w.body.pos, heading: w.body.heading };
-                    let s = view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y));
-                    (s.x, s.y)
-                })
+                .map(|&(base, tip, _)| (at(base), at(tip)))
                 .collect();
             if (deg - 90.0).abs() < 0.1 || (deg - 270.0).abs() < 0.1 {
-                // Side on: one above the other, sharing a vertical axis.
-                assert!(
-                    (pts[0].0 - pts[1].0).abs() < 0.5,
-                    "at {deg} degrees the ears differ in x by {:.1} px",
-                    (pts[0].0 - pts[1].0).abs()
-                );
+                // Side on: one above the other, sharing a vertical axis. Both
+                // balls, or a tip drifts off the base it belongs to.
+                for (k, name) in [(0usize, "bases"), (1, "tips")] {
+                    let (a, b) = if k == 0 { (pts[0].0, pts[1].0) } else { (pts[0].1, pts[1].1) };
+                    assert!(
+                        (a.0 - b.0).abs() < 0.5,
+                        "at {deg} degrees the ear {name} differ in x by {:.1} px",
+                        (a.0 - b.0).abs()
+                    );
+                }
             }
         }
     }
