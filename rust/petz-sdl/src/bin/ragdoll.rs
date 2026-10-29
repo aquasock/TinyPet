@@ -85,6 +85,7 @@ struct Creature {
     spine: Vec<usize>,
     legs: Vec<Leg>,
     head: Vec<usize>,
+    tail: Vec<usize>,
 }
 
 fn build() -> (Ragdoll, Creature) {
@@ -157,11 +158,13 @@ fn build() -> (Ragdoll, Creature) {
     }
 
     // Tail: no target, so it swings with the body.
+    let mut tail = Vec::new();
     let mut tail_prev = spine[0];
     for i in 0..4 {
         let t = r.add(Particle::new(252.0 - i as f32 * 15.0, base_y - 10.0, 10.0 - i as f32 * 1.2, BODY));
         r.link(tail_prev, t);
         tail_prev = t;
+        tail.push(t);
     }
 
     // Ears sit either side of the skull.
@@ -169,33 +172,90 @@ fn build() -> (Ragdoll, Creature) {
     r.particles[ear_b].side = 6.0;
 
     let head = vec![neck, skull, muzzle, nose, ear_a, ear_b];
-    (r, Creature { spine, legs, head })
+    (r, Creature { spine, legs, head, tail })
 }
 
 /// The walking controller: owns the clock, the world position, and the pose.
 struct Walker {
     gait: Gait,
-    /// Where the animal is in the world and which way it faces.
+    /// Where the animal is in the world and which way it faces. `heading` is
+    /// what the player asked for; `heading_body` is where the body has actually
+    /// got to, because a real animal cannot pivot instantly.
     body: Body,
+    heading_body: f32,
+    /// Per-ball heading, lagging the body by a part-specific time constant.
+    /// This is what makes a turn travel down the animal instead of teleporting
+    /// the whole skeleton to a new orientation.
+    facing: Vec<f32>,
+    lag: Vec<f32>,
     walking: bool,
 }
 
+/// Fastest the animal's body can turn, in radians per second.
+const MAX_TURN_RATE: f32 = 2.4;
+
 impl Walker {
-    fn new() -> Self {
+    fn new(creature: &Creature, particles: usize) -> Self {
+        let body = Body { pos: WVec3::new(320.0, -520.0, 0.0), heading: 0.42 };
+        // Lag by part. The head leads, the body follows, the tail trails - the
+        // same overlapping action an animator would key by hand.
+        let mut lag = vec![0.28; particles];
+        for &i in &creature.spine {
+            lag[i] = 0.34;
+        }
+        for (n, &i) in creature.spine.iter().enumerate() {
+            // Front of the spine answers sooner than the back of it.
+            lag[i] = 0.42 - 0.06 * n as f32;
+        }
+        for &i in &creature.head {
+            lag[i] = 0.11;
+        }
+        for leg in &creature.legs {
+            lag[leg.hip] = 0.24;
+            lag[leg.knee] = 0.30;
+            lag[leg.foot] = 0.36;
+        }
+        for (n, &i) in creature.tail.iter().enumerate() {
+            lag[i] = 0.50 + 0.08 * n as f32;
+        }
         Self {
             gait: Gait::walk(GaitSpec::default()),
-            // Start near the viewer, walking away from it: straight up the screen.
-            body: Body { pos: WVec3::new(320.0, -520.0, 0.0), heading: 0.42 },
+            body,
+            heading_body: body.heading,
+            facing: vec![body.heading; particles],
+            lag,
             walking: true,
         }
     }
 
+    /// Ease every ball's facing toward where the body has got to.
+    fn turn(&mut self, dt: f32) {
+        let delta = wrap_pi(self.body.heading - self.heading_body);
+        let max = MAX_TURN_RATE * dt;
+        self.heading_body = wrap_pi(self.heading_body + delta.clamp(-max, max));
+
+        for i in 0..self.facing.len() {
+            let want = wrap_pi(self.heading_body - self.facing[i]);
+            let lag = self.lag.get(i).copied().unwrap_or(0.25).max(1e-3);
+            let k = (dt / lag).min(1.0);
+            self.facing[i] = wrap_pi(self.facing[i] + want * k);
+        }
+    }
+
+    /// The body transform for one ball, using that ball's own facing.
+    fn part(&self, i: usize) -> Body {
+        Body { pos: self.body.pos, heading: self.facing.get(i).copied().unwrap_or(self.heading_body) }
+    }
+
     fn advance(&mut self, dt: f32) {
+        // Turning happens whether or not the animal is moving - a dog can look
+        // round while standing.
+        self.turn(dt);
         if !self.walking {
             return;
         }
         self.gait.advance(dt);
-        let f = self.body.forward();
+        let f = Body { pos: self.body.pos, heading: self.heading_body }.forward();
         self.body.pos.x += f.x * self.gait.spec.speed * dt;
         self.body.pos.y += f.y * self.gait.spec.speed * dt;
     }
@@ -263,6 +323,11 @@ fn measure(doll: &Ragdoll, c: &Creature) -> Pose {
     Pose { spine, head, legs, hip_to_knee, knee_to_foot }
 }
 
+/// Shortest signed difference between two angles, in (-pi, pi].
+fn wrap_pi(a: f32) -> f32 {
+    (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
+}
+
 fn rotate_light(dir: Vec3, degrees: f32) -> Vec3 {
     let yaw = dir.x.atan2(dir.z).to_degrees() + degrees;
     let pitch = dir.y.asin().to_degrees();
@@ -327,7 +392,7 @@ fn main() -> Result<(), String> {
 
     let (mut doll, creature) = build();
     let rest = measure(&doll, &creature);
-    let mut walker = Walker::new();
+    let mut walker = Walker::new(&creature, doll.particles.len());
     let mut grabbed: Option<usize> = None;
     let mut grab_point = Vec2::new(0.0, 0.0);
     let mut view = View::new(25.0, GROUND);
@@ -354,9 +419,11 @@ fn main() -> Result<(), String> {
                 sdl2::event::Event::KeyDown { keycode: Some(k), .. } => match k {
                     sdl2::keyboard::Keycode::Escape => break 'outer,
                     sdl2::keyboard::Keycode::R => {
-                        let (d, _c) = build();
+                        // Rebuilding resets indices as well as pose, so the
+                        // walker is rebuilt to match the new skeleton.
+                        let (d, c) = build();
                         doll = d;
-                        walker = Walker::new();
+                        walker = Walker::new(&c, doll.particles.len());
                         grabbed = None;
                     }
                     sdl2::keyboard::Keycode::Space => paused = !paused,
@@ -504,9 +571,9 @@ fn main() -> Result<(), String> {
         // Place every ball in the world and project it. The z we get back is
         // the draw order: there is no z-buffer, only a painter.
         screen.clear();
-        for p in &doll.particles {
+        for (i, p) in doll.particles.iter().enumerate() {
             let world = walker
-                .body
+                .part(i)
                 .to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y);
             screen.push(view.project(world));
         }
@@ -568,7 +635,8 @@ mod walk_tests {
     fn rig() -> (Ragdoll, Creature, Pose, Walker) {
         let (doll, c) = build();
         let rest = measure(&doll, &c);
-        (doll, c, rest, Walker::new())
+        let w = Walker::new(&c, doll.particles.len());
+        (doll, c, rest, w)
     }
 
     /// Run the walk loop exactly as `main` does, without a window.
@@ -586,7 +654,9 @@ mod walk_tests {
 
     #[test]
     fn walking_moves_the_animal_at_the_gait_speed() {
-        let start = Walker::new().body.pos;
+        let (d0, c0, _r, w0) = rig();
+        let start = w0.body.pos;
+        let _ = (d0, c0);
         let (_, _, w) = run(2.0);
         let travelled = w.body.pos.sub(start).length();
         let expected = w.gait.spec.speed * 2.0;
@@ -605,12 +675,10 @@ mod walk_tests {
             view.project(w.body.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y))
         };
         let now = midpoint(&doll);
+        let (d0, _, _, w0) = rig();
+        let p0 = &d0.particles[c.spine[2]];
         let start = View::new(25.0, GROUND).project(
-            Walker::new().body.to_world(
-                doll.particles[c.spine[2]].pos.x - BODY_ORIGIN,
-                doll.particles[c.spine[2]].side,
-                GROUND - doll.particles[c.spine[2]].pos.y,
-            ),
+            w0.body.to_world(p0.pos.x - BODY_ORIGIN, p0.side, GROUND - p0.pos.y),
         );
         assert!(
             now.y < start.y - 10.0,
@@ -619,6 +687,68 @@ mod walk_tests {
             now.y
         );
         let _ = w;
+    }
+
+    #[test]
+    fn the_body_turn_is_rate_limited() {
+        let (_, _, _, mut w) = rig();
+        let before = w.heading_body;
+        w.body.heading = before + 1.2; // ask for a hard turn
+        w.advance(1.0 / 120.0);
+        let moved = (w.heading_body - before).abs();
+        assert!(
+            moved <= MAX_TURN_RATE / 120.0 + 1e-4,
+            "body turned {moved} rad in one step, limit is {}",
+            MAX_TURN_RATE / 120.0
+        );
+        assert!(moved > 0.0, "the body ignored the turn entirely");
+    }
+
+    #[test]
+    fn a_turn_reaches_the_head_before_the_tail() {
+        let (_, c, _, mut w) = rig();
+        let target = w.heading_body + 1.0;
+        w.body.heading = target;
+        for _ in 0..12 {
+            w.advance(1.0 / 120.0);
+        }
+        let head_err = wrap_pi(target - w.facing[c.head[1]]).abs();
+        let tail_err = wrap_pi(target - w.facing[*c.tail.last().unwrap()]).abs();
+        assert!(
+            head_err < tail_err,
+            "head lagged the tail: head {head_err:.3}, tail {tail_err:.3}"
+        );
+        // ...and the whole animal must not have arrived at once.
+        assert!(tail_err > 0.05, "the tail snapped instantly: {tail_err:.3}");
+    }
+
+    #[test]
+    fn a_turn_propagates_and_then_settles() {
+        let (_, c, _, mut w) = rig();
+        let target = w.heading_body - 0.9;
+        w.body.heading = target;
+        for _ in 0..900 {
+            w.advance(1.0 / 120.0);
+        }
+        // The head is close to the command almost immediately, the tail last.
+        let head_err = wrap_pi(target - w.facing[c.head[1]]).abs();
+        let tail_err = wrap_pi(target - w.facing[*c.tail.last().unwrap()]).abs();
+        assert!(head_err < 0.05, "head never arrived: {head_err:.3}");
+        assert!(tail_err < 0.05, "tail never arrived: {tail_err:.3}");
+    }
+
+    #[test]
+    fn parts_hold_different_facings_during_a_turn() {
+        // The whole point: mid-turn the animal is not rigid.
+        let (_, c, _, mut w) = rig();
+        w.body.heading = w.heading_body + 1.2;
+        for _ in 0..20 {
+            w.advance(1.0 / 120.0);
+        }
+        let head = w.facing[c.head[1]];
+        let tail = w.facing[*c.tail.last().unwrap()];
+        let spread = wrap_pi(head - tail).abs();
+        assert!(spread > 0.08, "the body is still rigid: {spread:.3} rad between head and tail");
     }
 
     #[test]
