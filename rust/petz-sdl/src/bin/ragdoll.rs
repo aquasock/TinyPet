@@ -151,6 +151,9 @@ struct Creature {
     skull: usize,
     /// The sclera of each eye, for the visibility test.
     eyes: Vec<usize>,
+    /// (sclera, iris, rest height, side sign) per eye, so the placement can be
+    /// tuned while running instead of being baked in.
+    eye_parts: Vec<(usize, usize, f32, f32)>,
 }
 
 fn build() -> (Ragdoll, Creature) {
@@ -209,6 +212,7 @@ fn build() -> (Ragdoll, Creature) {
     let mut eyes = Vec::new();
     let mut overlay_pairs: Vec<(usize, usize)> = Vec::new();
     let mut eye_list: Vec<usize> = Vec::new();
+    let mut eye_parts: Vec<(usize, usize, f32, f32)> = Vec::new();
     for side in EYE_SIDES {
         let sclera = r.add(Particle::new(394.0, base_y - 34.0, 10.0, SCLERA));
         let iris = r.add(Particle::new(394.0, base_y - 33.0, 6.0, IRIS));
@@ -228,6 +232,7 @@ fn build() -> (Ragdoll, Creature) {
         eyes.extend([sclera, iris]);
         overlay_pairs.push((sclera, iris));
         eye_list.push(sclera);
+        eye_parts.push((sclera, iris, base_y - 34.0, side.signum()));
     }
 
     // Legs. The front pair hangs off the ball *behind* the neck - the shoulder -
@@ -266,7 +271,7 @@ fn build() -> (Ragdoll, Creature) {
 
     let mut head = vec![skull, muzzle, nose];
     head.extend(eyes);
-    (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eyes: eye_list })
+    (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eyes: eye_list, eye_parts })
 }
 
 /// The walking controller: owns the clock, the world position, and the pose.
@@ -283,6 +288,11 @@ struct Walker {
     facing: Vec<f32>,
     lag: Vec<f32>,
     walking: bool,
+    /// How far forward and how far to the side the eyes sit. Live-tunable
+    /// because where the eye stops clearing the skull is a judgement call, not
+    /// something that can be derived from first principles.
+    eye_fwd: f32,
+    eye_out: f32,
 }
 
 /// Fastest the animal's body can turn, in radians per second.
@@ -319,6 +329,8 @@ impl Walker {
             facing: vec![body.heading; particles],
             lag,
             walking: true,
+            eye_fwd: 394.0,
+            eye_out: 12.0,
         }
     }
 
@@ -387,6 +399,14 @@ impl Walker {
         }
         for (i, &p) in creature.head.iter().enumerate() {
             doll.drive_to(p, Vec2::new(rest.head[i].x, rest.head[i].y + lift), 0.4);
+        }
+        for &(sclera, iris, y, sign) in &creature.eye_parts {
+            for i in [sclera, iris] {
+                doll.drive_to(i, Vec2::new(self.eye_fwd, y + lift), 0.5);
+                if let Some(p) = doll.particles.get_mut(i) {
+                    p.side = sign * self.eye_out;
+                }
+            }
         }
 
         for (i, leg) in creature.legs.iter().enumerate() {
@@ -528,7 +548,7 @@ fn main() -> Result<(), String> {
     println!(
         "drag: left mouse   W: walk/stop   +/-: speed   Q/E: turn   V: view pitch\n\
          light: arrows   ambience: A/S   steps: [ ]   texture: T   flex: , .   P: settings\n\
-         R: reset   Space: pause   Esc: quit"
+         eyes: H/J forward, K/L out   R: reset   Space: pause   Esc: quit"
     );
     report(light, steps, tex_idx, textures[tex_idx].0);
 
@@ -618,6 +638,22 @@ fn main() -> Result<(), String> {
                         report(light, steps, tex_idx, textures[tex_idx].0);
                     }
                     sdl2::keyboard::Keycode::P => report(light, steps, tex_idx, textures[tex_idx].0),
+                    sdl2::keyboard::Keycode::K => {
+                        walker.eye_out = (walker.eye_out - 0.5).max(4.0);
+                        println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
+                    }
+                    sdl2::keyboard::Keycode::L => {
+                        walker.eye_out = (walker.eye_out + 0.5).min(24.0);
+                        println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
+                    }
+                    sdl2::keyboard::Keycode::H => {
+                        walker.eye_fwd = (walker.eye_fwd - 1.0).max(370.0);
+                        println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
+                    }
+                    sdl2::keyboard::Keycode::J => {
+                        walker.eye_fwd = (walker.eye_fwd + 1.0).min(414.0);
+                        println!("eyes: forward {:.1} out {:.1}", walker.eye_fwd, walker.eye_out);
+                    }
                     sdl2::keyboard::Keycode::A => {
                         light.ambient = (light.ambient - 0.05).max(0.0);
                         report(light, steps, tex_idx, textures[tex_idx].0);
