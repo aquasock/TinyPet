@@ -10,7 +10,7 @@
 # deploy from the build output; verify with `status`.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-INST="$ROOT/build/install"
+INST="${PETZ_INSTALL:-$ROOT/build/install}"
 SHIM="$INST/UVocab.dll"
 REAL="$INST/UVocab_real.dll"
 BUILT="$ROOT/harness/UVocab_shim.dll"

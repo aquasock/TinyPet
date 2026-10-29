@@ -487,6 +487,28 @@ void tex_post_probe(unsigned ret)
 /* Install a rel32 jump at rva, replaying `len` whole prologue bytes from a
  * trampoline. Returns the trampoline pointer, or NULL if the bytes do not
  * match (so we never patch a build we do not recognise). */
+/* Resolve an exported method by its mangled name. Addresses move between builds
+ * (the 4.2 patch shifts XFillRotatedCircle from 0x3ad50 to 0x5cc10), but the
+ * export table is stable, so name lookup makes the hooks build-independent. */
+static void *find_export(const char *want)
+{
+    BYTE *base = (BYTE *)GetModuleHandleA(NULL);
+    IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)base;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return NULL;
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
+    IMAGE_DATA_DIRECTORY *dir = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (!dir->VirtualAddress) return NULL;
+    IMAGE_EXPORT_DIRECTORY *exp = (IMAGE_EXPORT_DIRECTORY *)(base + dir->VirtualAddress);
+    DWORD *names = (DWORD *)(base + exp->AddressOfNames);
+    WORD *ords = (WORD *)(base + exp->AddressOfNameOrdinals);
+    DWORD *funcs = (DWORD *)(base + exp->AddressOfFunctions);
+    for (DWORD i = 0; i < exp->NumberOfNames; i++) {
+        if (!lstrcmpA((const char *)(base + names[i]), want))
+            return base + funcs[ords[i]];
+    }
+    return NULL;
+}
+
 static void *install_inline(DWORD rva, void *entry, const BYTE *expect, int len)
 {
     BYTE *base = (BYTE *)GetModuleHandleA(NULL);
@@ -512,12 +534,23 @@ static void *install_inline(DWORD rva, void *entry, const BYTE *expect, int len)
 static void install_tex_hook(void)
 {
     static const BYTE expect[8] = { 0x83,0xEC,0x24, 0x53, 0x8B,0x5C,0x24,0x2C };
-    g_tex_tramp = install_inline(0x39f10, (void *)tex_entry, expect, 8);
+    /* Resolve by name so the same shim works on 4.00.01 and 4.2. */
     {
-        static const BYTE sp[8] = { 0x83,0xEC,0x28, 0xA0,0x88,0x0B,0x64,0x00 };
-        g_serial_tramp = install_inline(0x615c0, (void *)serial_entry, sp, 8);
-        slog(g_serial_tramp ? "serial hook: installed at RVA 0x615c0"
-                            : "serial hook: not installed");
+        void *fn = find_export("?_initTextureDrawing@XDrawPort@@QBEPBEABVCircleRenderBlock@@HAAJ@Z");
+        if (fn) {
+            DWORD rva = (DWORD)fn - (DWORD)GetModuleHandleA(NULL);
+            g_tex_tramp = install_inline(rva, (void *)tex_entry, expect, 8);
+            slog(g_tex_tramp ? "tex hook: installed (by name)" : "tex hook: prologue mismatch");
+        } else slog("tex hook: export not found");
+    }
+    {
+        void *fn = find_export("?ValidRetailSerialNumber@XSecure@@SA_NPBDW4ERunMode@@@Z");
+        if (fn) {
+            static const BYTE sp[8] = { 0x83,0xEC,0x28, 0xA0,0x88,0x0B,0x64,0x00 };
+            DWORD rva = (DWORD)fn - (DWORD)GetModuleHandleA(NULL);
+            g_serial_tramp = install_inline(rva, (void *)serial_entry, sp, 8);
+            slog(g_serial_tramp ? "serial hook: installed (by name)" : "serial hook: prologue mismatch");
+        } else slog("serial hook: export not found");
     }
     slog(g_tex_tramp ? "tex hook: installed at RVA 0x39f10"
                      : "tex hook: not installed");
@@ -689,10 +722,9 @@ void fill_probe(void *drawport, void *block)
 
 static void install_fill_hook(void)
 {
-    BYTE *base = (BYTE *)GetModuleHandleA(NULL);
-    BYTE *fn = base + 0x3ad50;
     static const BYTE expect[5] = { 0x83, 0xEC, 0x24, 0x53, 0x55 };
-
+    BYTE *fn = (BYTE *)find_export("?XFillRotatedCircle@XDrawPort@@QAE_NPBVCircleRenderBlock@@@Z");
+    if (!fn) { slog("fill hook: export not found"); return; }
     for (int i = 0; i < 5; i++) {
         if (fn[i] != expect[i]) { slog("fill hook: prologue mismatch, skipped"); return; }
     }

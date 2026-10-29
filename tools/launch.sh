@@ -18,7 +18,7 @@ DETACH=0
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$ROOT/build"
-INSTALL="$BUILD/install"
+INSTALL="${PETZ_INSTALL:-$BUILD/install}"
 
 [ -f "$INSTALL/Petz 4.exe" ] || { echo "run tools/extract-gamedata.sh first" >&2; exit 1; }
 
