@@ -58,50 +58,66 @@ fn build_creature() -> Ragdoll {
     r.bounds = Some((8.0, 8.0, W as f32 - 8.0, H as f32 - 8.0));
     r.gravity = 1400.0;
     r.damping = 0.985;
-    r.iterations = 10;
+    r.iterations = 16;
     r.contact = 0.35;
 
-    // Spine: rear haunch to shoulders, tapering.
-    let spine_x = [270.0, 300.0, 330.0, 360.0, 390.0];
-    let spine_r = [17.0, 16.0, 15.0, 14.0, 13.0];
+    // Radii are roughly 70% of the bone length, so neighbours overlap heavily
+    // and the silhouette closes up. Spheres that only touch read as beads.
+    let spacing = 26.0;
+    let spine_r = [24.0, 23.0, 22.0, 21.0, 20.0];
     let mut spine = Vec::new();
-    for i in 0..spine_x.len() {
-        spine.push(r.add(Particle::new(spine_x[i], 150.0, spine_r[i], BODY)));
+    for i in 0..spine_r.len() {
+        let x = 276.0 + i as f32 * spacing;
+        spine.push(r.add(Particle::new(x, 150.0, spine_r[i], BODY)));
     }
     for i in 0..spine.len() - 1 {
         r.link(spine[i], spine[i + 1]);
     }
-    // Soft braces along the spine: a body that folds is a worm, a body that
-    // cannot fold is a plank. These give it a preferred posture without
-    // locking it rigid.
+    // Braces along the spine: a body that folds at every joint is a worm, one
+    // that cannot fold is a plank. Stiff enough to keep a posture, soft enough
+    // to squash when it lands.
     for i in 0..spine.len().saturating_sub(2) {
-        r.constraints.push(petz_core::Constraint::soft(spine[i], spine[i + 2], 60.0, 0.25));
+        let rest = r.particles[spine[i]].pos.sub(r.particles[spine[i + 2]].pos).length();
+        r.constraints.push(petz_core::Constraint::soft(spine[i], spine[i + 2], rest, 0.7));
+    }
+    // A long brace across the whole torso. This is what stops the spine
+    // concertina-ing when the pet is lifted by the middle.
+    {
+        let rest = r.particles[spine[0]].pos.sub(r.particles[spine[4]].pos).length();
+        r.constraints.push(petz_core::Constraint::soft(spine[0], spine[4], rest, 0.5));
     }
 
     // Head: neck, skull, muzzle. The muzzle is lighter, as in the retail pet.
-    let neck = r.add(Particle::new(405.0, 130.0, 12.0, BODY));
-    let skull = r.add(Particle::new(425.0, 118.0, 20.0, BODY));
-    let muzzle = r.add(Particle::new(443.0, 126.0, 10.0, LIGHT));
-    let nose = r.add(Particle::new(452.0, 122.0, 4.0, DARK));
-    r.link(*spine.last().unwrap(), neck);
+    let last = *spine.last().unwrap();
+    let neck = r.add(Particle::new(408.0, 138.0, 17.0, BODY));
+    let skull = r.add(Particle::new(426.0, 122.0, 26.0, BODY));
+    let muzzle = r.add(Particle::new(447.0, 132.0, 13.0, LIGHT));
+    let nose = r.add(Particle::new(457.0, 127.0, 5.0, DARK));
+    r.link(last, neck);
     r.link(neck, skull);
     r.link(skull, muzzle);
     r.link(muzzle, nose);
-    r.link(skull, *spine.last().unwrap()); // keep the head from lolling
+    // Two braces hold the head up instead of one joint doing all the work.
+    r.link(skull, spine[3]);
+    r.link(neck, spine[3]);
 
     // Ears.
-    let ear_a = r.add(Particle::new(421.0, 101.0, 7.0, BODY));
-    let ear_b = r.add(Particle::new(433.0, 103.0, 7.0, BODY));
+    let ear_a = r.add(Particle::new(420.0, 100.0, 9.0, BODY));
+    let ear_b = r.add(Particle::new(435.0, 104.0, 9.0, BODY));
     r.link(skull, ear_a);
     r.link(skull, ear_b);
 
-    // Legs: shoulder/haunch, knee, paw. Two per end, front and rear.
-    let legs: [(usize, f32); 4] = [(0, 272.0), (1, 302.0), (3, 372.0), (4, 392.0)];
-    for (spine_idx, x) in legs {
-        let upper = r.add(Particle::new(x, 178.0, 9.0, BODY));
-        let lower = r.add(Particle::new(x, 205.0, 7.0, BODY));
-        let paw = r.add(Particle::new(x, 226.0, 6.0, LIGHT));
-        r.link(spine[spine_idx], upper);
+    // Legs: shoulder/haunch, knee, paw. Each attached to two spine balls so the
+    // limb cannot rotate freely about a point.
+    let legs: [(usize, usize, f32); 4] = [(0, 1, 278.0), (1, 2, 304.0), (3, 4, 384.0), (2, 3, 410.0)];
+    for (a, b, x) in legs {
+        // Close under the spine so the shoulder ball always overlaps the
+        // torso balls; a gap there is what makes a paw detach on screen.
+        let upper = r.add(Particle::new(x, 170.0, 15.0, BODY));
+        let lower = r.add(Particle::new(x, 196.0, 12.0, BODY));
+        let paw = r.add(Particle::new(x, 218.0, 10.0, LIGHT));
+        r.link(spine[a], upper);
+        r.link(spine[b], upper);
         r.link(upper, lower);
         r.link(lower, paw);
     }
@@ -109,9 +125,22 @@ fn build_creature() -> Ragdoll {
     // Tail, hanging off the rear.
     let mut tail_prev = spine[0];
     for i in 0..4 {
-        let t = r.add(Particle::new(255.0 - i as f32 * 14.0, 143.0, 6.0 - i as f32 * 0.8, BODY));
+        let t = r.add(Particle::new(
+            252.0 - i as f32 * 15.0,
+            140.0,
+            10.0 - i as f32 * 1.2,
+            BODY,
+        ));
         r.link(tail_prev, t);
         tail_prev = t;
+    }
+
+    // Stiffen every bone. Default links already sit at 1.0; this is explicit so
+    // the intent survives edits.
+    for c in r.constraints.iter_mut() {
+        if c.stiffness >= 0.7 {
+            c.stiffness = 1.0;
+        }
     }
 
     r

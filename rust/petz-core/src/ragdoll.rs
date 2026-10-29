@@ -216,15 +216,26 @@ impl Ragdoll {
         }
     }
 
-    /// Spheres that overlap push each other apart. The pet's own balls are
-    /// meant to interpenetrate a little - that is what makes a body read as
-    /// one soft mass rather than a bag of marbles - so this is deliberately
-    /// gentle and only runs for particles that are not already constrained
-    /// tightly to each other.
+    /// True if a spring joins these two. Contacts must ignore such pairs:
+    /// a body is *meant* to have its own balls interpenetrate, and letting a
+    /// contact push apart a pair that a bone is holding together just makes
+    /// the two solvers fight, which is what turns a body into a bead chain.
+    fn linked(&self, i: usize, j: usize) -> bool {
+        self.constraints
+            .iter()
+            .any(|c| (c.a == i && c.b == j) || (c.a == j && c.b == i))
+    }
+
+    /// Spheres that overlap push each other apart. Deliberately gentle: the
+    /// pet's balls are meant to interpenetrate, that is what makes a body read
+    /// as one soft mass rather than a bag of marbles.
     fn solve_contacts(&mut self) {
         let n = self.particles.len();
         for i in 0..n {
             for j in (i + 1)..n {
+                if self.linked(i, j) {
+                    continue;
+                }
                 let (pi, pj) = (self.particles[i].pos, self.particles[j].pos);
                 let d = pj.sub(pi);
                 let dist = d.length();
@@ -386,6 +397,23 @@ mod tests {
     }
 
     #[test]
+    fn contacts_do_not_fight_a_bone() {
+        // Two spheres far more overlapped than their radius sum, held at that
+        // distance by a stiff spring. The contact pass must leave them alone.
+        let mut r = Ragdoll::new();
+        let a = r.add(Particle::new(100.0, 100.0, 20.0, 10));
+        let b = r.add(Particle::new(110.0, 100.0, 20.0, 10));
+        r.link(a, b);
+        r.gravity = 0.0;
+        r.contact = 1.0;
+        for _ in 0..30 {
+            r.step(1.0 / 60.0);
+        }
+        let d = r.particles[a].pos.sub(r.particles[b].pos).length();
+        assert!((d - 10.0).abs() < 0.5, "contact shoved a linked pair to {d}");
+    }
+
+    #[test]
     fn the_solver_is_deterministic() {
         let run = || {
             let mut r = chain(8);
@@ -396,5 +424,73 @@ mod tests {
             r.particles.iter().map(|p| p.pos.x.to_bits()).collect::<Vec<_>>()
         };
         assert_eq!(run(), run());
+    }
+}
+
+#[cfg(test)]
+mod body_tests {
+    use super::*;
+
+    /// A stand-in for a pet torso: five balls, heavily overlapping, all linked.
+    /// This is the property the sandbox has to satisfy - when one ball is held,
+    /// the body must stay one connected mass, not trail apart into beads.
+    fn torso() -> Ragdoll {
+        let mut r = Ragdoll::new();
+        let radii = [24.0, 23.0, 22.0, 21.0, 20.0];
+        for (i, rad) in radii.iter().enumerate() {
+            r.add(Particle::new(200.0 + i as f32 * 26.0, 150.0, *rad, 61));
+        }
+        for i in 0..4 {
+            r.link(i, i + 1);
+        }
+        r.particles[2].pinned = true;
+        r
+    }
+
+    fn max_gap(r: &Ragdoll) -> f32 {
+        // Largest distance between neighbouring sphere surfaces along the
+        // links. Positive means a visible gap in the silhouette.
+        r.constraints
+            .iter()
+            .map(|c| {
+                let d = r.particles[c.a].pos.sub(r.particles[c.b].pos).length();
+                d - (r.particles[c.a].radius + r.particles[c.b].radius)
+            })
+            .fold(f32::MIN, f32::max)
+    }
+
+    #[test]
+    fn a_held_body_stays_one_piece() {
+        let mut r = torso();
+        for _ in 0..240 {
+            r.step(1.0 / 120.0);
+        }
+        assert!(
+            max_gap(&r) < 0.0,
+            "balls separated by {} px while hanging",
+            max_gap(&r)
+        );
+    }
+
+    #[test]
+    fn a_held_body_does_not_stretch() {
+        let before: f32 = (0..4)
+            .map(|i| r_dist(&torso(), i))
+            .sum();
+        let mut r = torso();
+        for _ in 0..240 {
+            r.step(1.0 / 120.0);
+        }
+        let after: f32 = (0..4).map(|i| {
+            r.particles[i].pos.sub(r.particles[i + 1].pos).length()
+        }).sum();
+        assert!(
+            (after - before).abs() < 2.0,
+            "spine changed length {before} -> {after}"
+        );
+    }
+
+    fn r_dist(r: &Ragdoll, i: usize) -> f32 {
+        r.particles[i].pos.sub(r.particles[i + 1].pos).length()
     }
 }
