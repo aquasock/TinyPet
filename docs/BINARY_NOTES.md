@@ -551,6 +551,22 @@ The divisor is 128 and the textures are 128 px wide. There is no filter, no
 blend and no float anywhere in the sampling path, so a port can reproduce it
 exactly with integer arithmetic.
 
+**[verified] Rotation is one sin and one cos per fill, not per pixel.**
+`XDrawPort::XFillRotatedCircle` (RVA `0x3ad50`) is 551 instructions containing
+**57 x87 operations, but only one `fsin` and one `fcos`**, alongside 8 `rep stos`
+fills and 4 `imul`s. So the angle is converted to (sin, cos) once, in 80-bit x87,
+and everything downstream is integer.
+
+That bounds the floating-point exposure of the entire ball pipeline to **one
+trigonometric evaluation per ball per frame**. The result feeds 16-bit fixed
+point (`XPointRot3_16`), so an f64-vs-x87 difference in the last bit only
+matters if the value sits exactly on a rounding boundary.
+
+This is verifiable rather than hopeful: enumerate the quantised angle domain and
+check that f64 and x87 agree after fixed-point conversion. If any angle
+disagrees, build a table for those angles. Either way the port stays integer
+downstream.
+
 **[inferred]** So a ball's colour is a **single palette index** from the LNZ,
 and the per-pixel variation (~19 indices clustered around a base) comes from
 sampling a texture as a shade/height map and offsetting that index. That fits the
