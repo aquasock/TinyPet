@@ -459,7 +459,7 @@ impl Walker {
             ear_angle: -14.0_f32.to_radians(),
             ear_radius: 33.0,
             ear_sink: 0.35,
-            ear_bias: 0.0,
+            ear_bias: -6.0,
             moving: 1.0,
         }
     }
@@ -550,10 +550,16 @@ impl Walker {
                 tx += self.ear_sink * (bx - tx);
                 ty += self.ear_sink * (by - ty);
                 doll.drag_to(tip, Vec2::new(tx, ty));
+                // Only the ear on the viewer's side gets the bias. The one
+                // round the back takes none, so the head hides it properly -
+                // which is what makes the near ear look attached rather than
+                // painted over the top.
+                let near = -self.heading_body.sin() * sign <= 0.0;
+                let bias = if near { self.ear_bias } else { 0.0 };
                 for i in [base, tip] {
                     if let Some(p) = doll.particles.get_mut(i) {
                         p.side = sign * 10.0;
-                        p.z_bias = self.ear_bias;
+                        p.z_bias = bias;
                     }
                 }
                 // Let the springs follow the drive. Held at the lengths they
