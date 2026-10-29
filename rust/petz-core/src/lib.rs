@@ -6,10 +6,12 @@
 
 pub mod lnz;
 pub mod ragdoll;
+pub mod shade;
 pub mod spans;
 pub mod surface;
 
 pub use lnz::Lnz;
 pub use ragdoll::{Constraint, Particle, Ragdoll, Vec2};
+pub use shade::{shade_disc, Light, Ramp};
 pub use spans::{fill_disc, fill_ring, row_span, SpanTable};
 pub use surface::{Palette, Surface};

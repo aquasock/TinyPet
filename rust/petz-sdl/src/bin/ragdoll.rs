@@ -14,7 +14,10 @@
 
 use std::time::{Duration, Instant};
 
+use std::collections::HashMap;
+
 use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
+use petz_core::shade::{shade_disc, Light, Ramp, Vec3};
 use petz_core::{fill_disc, Palette, SpanTable, Surface};
 use std::fs;
 use std::path::PathBuf;
@@ -146,6 +149,21 @@ fn build_creature() -> Ragdoll {
     r
 }
 
+/// Spin the light around the vertical axis without changing its elevation.
+fn rotate_light(dir: Vec3, degrees: f32) -> Vec3 {
+    let yaw = dir.x.atan2(dir.z).to_degrees() + degrees;
+    let pitch = dir.y.asin().to_degrees();
+    Vec3::from_angles(yaw, pitch)
+}
+
+/// Raise or lower the light, clamped short of the poles so the direction never
+/// degenerates to straight up or straight down.
+fn elevate_light(dir: Vec3, degrees: f32) -> Vec3 {
+    let yaw = dir.x.atan2(dir.z).to_degrees();
+    let pitch = (dir.y.asin().to_degrees() + degrees).clamp(-80.0, 80.0);
+    Vec3::from_angles(yaw, pitch)
+}
+
 fn main() -> Result<(), String> {
     let sdl = sdl2::init()?;
     let video = sdl.video()?;
@@ -166,6 +184,20 @@ fn main() -> Result<(), String> {
 
     let table = load_table();
     let palette = load_palette();
+
+    // One ramp per material, derived from the game palette. Light picks the
+    // band; the ramp belongs to the matter.
+    let mut steps = 6usize;
+    let mut ramps: HashMap<u8, Ramp> = HashMap::new();
+    let mut rebuild_ramps = |steps: usize, ramps: &mut HashMap<u8, Ramp>| {
+        ramps.clear();
+        for base in [BODY, LIGHT, DARK] {
+            ramps.insert(base, Ramp::from_palette(&palette, base, steps));
+        }
+    };
+    rebuild_ramps(steps, &mut ramps);
+    let mut light = Light::default();
+
     let mut doll = build_creature();
     let mut events = sdl.event_pump()?;
     let mut grabbed: Option<usize> = None;
@@ -177,7 +209,7 @@ fn main() -> Result<(), String> {
     let mut acc = 0.0f64;
     let mut last = Instant::now();
 
-    println!("drag a ball with the left mouse button; R resets; Space pauses; Esc quits");
+    println!("drag: left mouse   light: arrows   ambience: A/S   ramp steps: [ ]   R reset   Space pause   Esc quit");
 
     'outer: loop {
         for e in events.poll_iter() {
@@ -190,6 +222,22 @@ fn main() -> Result<(), String> {
                         grabbed = None;
                     }
                     sdl2::keyboard::Keycode::Space => paused = !paused,
+                    sdl2::keyboard::Keycode::Left => light.dir = rotate_light(light.dir, -12.0),
+                    sdl2::keyboard::Keycode::Right => light.dir = rotate_light(light.dir, 12.0),
+                    sdl2::keyboard::Keycode::Up => light.dir = elevate_light(light.dir, 8.0),
+                    sdl2::keyboard::Keycode::Down => light.dir = elevate_light(light.dir, -8.0),
+                    sdl2::keyboard::Keycode::LeftBracket => {
+                        steps = (steps - 1).max(1);
+                        rebuild_ramps(steps, &mut ramps);
+                        println!("ramp steps: {steps}");
+                    }
+                    sdl2::keyboard::Keycode::RightBracket => {
+                        steps = (steps + 1).min(24);
+                        rebuild_ramps(steps, &mut ramps);
+                        println!("ramp steps: {steps}");
+                    }
+                    sdl2::keyboard::Keycode::A => { light.ambient = (light.ambient - 0.05).max(0.0); }
+                    sdl2::keyboard::Keycode::S => { light.ambient = (light.ambient + 0.05).min(0.9); }
                     _ => {}
                 },
                 sdl2::event::Event::MouseButtonDown { x, y, mouse_btn: sdl2::mouse::MouseButton::Left, .. } => {
@@ -234,16 +282,31 @@ fn main() -> Result<(), String> {
         // Painter's order by y, so nearer balls cover further ones. That is the
         // whole depth model - the original has no z-buffer either.
         let mut order: Vec<usize> = (0..doll.particles.len()).collect();
-        order.sort_by(|&a, &b| doll.particles[a].pos.y.partial_cmp(&doll.particles[b].pos.y).unwrap());
-        for i in order {
+        order.sort_by(|&a, &b| {
+            doll.particles[a].pos.y.partial_cmp(&doll.particles[b].pos.y).unwrap()
+        });
+
+        // Rim and body are separate passes over the whole body, not two fills
+        // per ball. Drawing ball-by-ball would leave a dark ring wherever one
+        // ball overlaps another; the rim belongs to the silhouette, not to each
+        // sphere.
+        for &i in &order {
+            let p = &doll.particles[i];
+            let r = p.radius.round() as i32;
+            if r < 1 { continue; }
+            let (cx, cy) = (p.pos.x.round() as i32, p.pos.y.round() as i32);
+            fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), OUTLINE);
+        }
+        for &i in &order {
             let p = &doll.particles[i];
             let r = p.radius.round() as i32;
             if r < 1 { continue; }
             let (cx, cy) = (p.pos.x.round() as i32, p.pos.y.round() as i32);
             let d = (r * 2) as usize;
-            // Rim first, body over it: the same trick the outline pass uses.
-            fill_disc(&mut surface, &table, cx, cy, (d + 4).min(255), OUTLINE);
-            fill_disc(&mut surface, &table, cx, cy, d, p.colour);
+            match ramps.get(&p.colour) {
+                Some(ramp) => shade_disc(&mut surface, &table, cx, cy, d, ramp, light),
+                None => fill_disc(&mut surface, &table, cx, cy, d, p.colour),
+            }
         }
         let rgb = palette.to_rgb(&surface);
         tex.update(None, &rgb, W * 3).map_err(|e| e.to_string())?;
