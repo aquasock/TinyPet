@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 use std::collections::HashMap;
 
 use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
-use petz_core::shade::{shade_disc, Light, Ramp, Vec3};
+use petz_core::fur::{dapple, shade_disc_pattern, stripes, Pattern, Texture};
+use petz_core::shade::{Light, Ramp, Vec3};
 use petz_core::{fill_disc, Palette, SpanTable, Surface};
 use std::fs;
 use std::path::PathBuf;
@@ -164,6 +165,17 @@ fn elevate_light(dir: Vec3, degrees: f32) -> Vec3 {
     Vec3::from_angles(yaw, pitch)
 }
 
+/// Print the current look so a tuned setup can be copied into the defaults
+/// instead of being lost when the process exits.
+fn report(light: Light, steps: usize, tex: usize, texture: &str) {
+    let yaw = light.dir.x.atan2(light.dir.z).to_degrees();
+    let pitch = light.dir.y.asin().to_degrees();
+    println!(
+        "settings: steps={steps} yaw={yaw:.1} pitch={pitch:.1} ambient={:.2} diffuse={:.2} tex={tex} ({texture})",
+        light.ambient, light.diffuse
+    );
+}
+
 fn main() -> Result<(), String> {
     let sdl = sdl2::init()?;
     let video = sdl.video()?;
@@ -198,6 +210,21 @@ fn main() -> Result<(), String> {
     rebuild_ramps(steps, &mut ramps);
     let mut light = Light::default();
 
+    // Patterns are procedural, so nothing here is game art. T cycles them.
+    let textures: Vec<(&str, Texture)> = vec![
+        ("plain", Texture::flat(64, 64, 255)),
+        ("dapple", dapple(64, 64, 17, 255)),
+        ("stripes", stripes(64, 64, 5, 255)),
+    ];
+    let mut tex_idx = 0usize;
+    let patterns = |base: u8, alt: u8, steps: usize, tex: &Texture| Pattern {
+        base: Ramp::from_palette(&palette, base, steps),
+        alt: Ramp::from_palette(&palette, alt, steps),
+        texture: tex.clone(),
+        threshold: 128,
+        phase: 0.0,
+    };
+
     let mut doll = build_creature();
     let mut events = sdl.event_pump()?;
     let mut grabbed: Option<usize> = None;
@@ -209,7 +236,8 @@ fn main() -> Result<(), String> {
     let mut acc = 0.0f64;
     let mut last = Instant::now();
 
-    println!("drag: left mouse   light: arrows   ambience: A/S   ramp steps: [ ]   R reset   Space pause   Esc quit");
+    println!("drag: left mouse   light: arrows   ambience: A/S   steps: [ ]   texture: T   P: print settings   R reset   Space pause   Esc quit");
+    report(light, steps, tex_idx, textures[tex_idx].0);
 
     'outer: loop {
         for e in events.poll_iter() {
@@ -222,22 +250,45 @@ fn main() -> Result<(), String> {
                         grabbed = None;
                     }
                     sdl2::keyboard::Keycode::Space => paused = !paused,
-                    sdl2::keyboard::Keycode::Left => light.dir = rotate_light(light.dir, -12.0),
-                    sdl2::keyboard::Keycode::Right => light.dir = rotate_light(light.dir, 12.0),
-                    sdl2::keyboard::Keycode::Up => light.dir = elevate_light(light.dir, 8.0),
-                    sdl2::keyboard::Keycode::Down => light.dir = elevate_light(light.dir, -8.0),
+                    sdl2::keyboard::Keycode::Left => {
+                        light.dir = rotate_light(light.dir, -12.0);
+                        report(light, steps, tex_idx, textures[tex_idx].0);
+                    }
+                    sdl2::keyboard::Keycode::Right => {
+                        light.dir = rotate_light(light.dir, 12.0);
+                        report(light, steps, tex_idx, textures[tex_idx].0);
+                    }
+                    sdl2::keyboard::Keycode::Up => {
+                        light.dir = elevate_light(light.dir, 8.0);
+                        report(light, steps, tex_idx, textures[tex_idx].0);
+                    }
+                    sdl2::keyboard::Keycode::Down => {
+                        light.dir = elevate_light(light.dir, -8.0);
+                        report(light, steps, tex_idx, textures[tex_idx].0);
+                    }
                     sdl2::keyboard::Keycode::LeftBracket => {
                         steps = (steps - 1).max(1);
                         rebuild_ramps(steps, &mut ramps);
-                        println!("ramp steps: {steps}");
+                        report(light, steps, tex_idx, textures[tex_idx].0);
                     }
                     sdl2::keyboard::Keycode::RightBracket => {
                         steps = (steps + 1).min(24);
                         rebuild_ramps(steps, &mut ramps);
-                        println!("ramp steps: {steps}");
+                        report(light, steps, tex_idx, textures[tex_idx].0);
                     }
-                    sdl2::keyboard::Keycode::A => { light.ambient = (light.ambient - 0.05).max(0.0); }
-                    sdl2::keyboard::Keycode::S => { light.ambient = (light.ambient + 0.05).min(0.9); }
+                    sdl2::keyboard::Keycode::A => {
+                        light.ambient = (light.ambient - 0.05).max(0.0);
+                        report(light, steps, tex_idx, textures[tex_idx].0);
+                    }
+                    sdl2::keyboard::Keycode::S => {
+                        light.ambient = (light.ambient + 0.05).min(0.9);
+                        report(light, steps, tex_idx, textures[tex_idx].0);
+                    }
+                    sdl2::keyboard::Keycode::T => {
+                        tex_idx = (tex_idx + 1) % textures.len();
+                        report(light, steps, tex_idx, textures[tex_idx].0);
+                    }
+                    sdl2::keyboard::Keycode::P => report(light, steps, tex_idx, textures[tex_idx].0),
                     _ => {}
                 },
                 sdl2::event::Event::MouseButtonDown { x, y, mouse_btn: sdl2::mouse::MouseButton::Left, .. } => {
@@ -303,10 +354,13 @@ fn main() -> Result<(), String> {
             if r < 1 { continue; }
             let (cx, cy) = (p.pos.x.round() as i32, p.pos.y.round() as i32);
             let d = (r * 2) as usize;
-            match ramps.get(&p.colour) {
-                Some(ramp) => shade_disc(&mut surface, &table, cx, cy, d, ramp, light),
-                None => fill_disc(&mut surface, &table, cx, cy, d, p.colour),
-            }
+            let alt_base = match p.colour {
+                BODY => LIGHT,
+                LIGHT => BODY,
+                other => other,
+            };
+            let pat = patterns(p.colour, alt_base, steps, &textures[tex_idx].1);
+            shade_disc_pattern(&mut surface, &table, cx, cy, d, light, &pat);
         }
         let rgb = palette.to_rgb(&surface);
         tex.update(None, &rgb, W * 3).map_err(|e| e.to_string())?;
