@@ -45,6 +45,8 @@ const SCLERA: u8 = 245;
 /// outline colour. Teal is the Dalmatian's; any breed colour works.
 const IRIS: u8 = 244;
 const IRIS_RING: u8 = 6;
+/// Ears are a darker shade than the coat, as they are in every breed file.
+const EAR: u8 = 95;
 
 /// Where the floor is. Feet stand on this line.
 const GROUND: f32 = 218.0;
@@ -94,8 +96,11 @@ struct Creature {
     tail: Vec<usize>,
     /// (base, overlay) pairs drawn as one unit: the iris sits on its sclera.
     eye_overlays: Vec<(usize, usize)>,
-    /// (sclera, side) for each eye, so the one facing away can be culled.
-    eye_sides: Vec<(usize, f32)>,
+    /// The skull, used as the reference the eyes are tested against.
+    skull: usize,
+    /// (sclera, lid) for each eye. The lid is not a retail ball - Petz
+    /// parameterises it - but a lid ball is the cheapest way to draw one.
+    eye_lids: Vec<(usize, usize)>,
 }
 
 fn build() -> (Ragdoll, Creature) {
@@ -150,7 +155,7 @@ fn build() -> (Ragdoll, Creature) {
     // eyelid ball at all - Petz parameterises the lid instead.
     let mut eyes = Vec::new();
     let mut overlay_pairs: Vec<(usize, usize)> = Vec::new();
-    let mut eye_sides: Vec<(usize, f32)> = Vec::new();
+    let mut lid_pairs: Vec<(usize, usize)> = Vec::new();
     for side in [-9.0f32, 9.0f32] {
         let sclera = r.add(Particle::new(392.0, base_y - 32.0, 10.0, SCLERA));
         let iris = r.add(Particle::new(392.0, base_y - 31.0, 6.0, IRIS));
@@ -160,17 +165,37 @@ fn build() -> (Ragdoll, Creature) {
         }
         r.particles[iris].rim = IRIS_RING;
         r.particles[iris].layer = 1;
+        // A lid ball, in coat colour, that drops over the eye to blink.
+        let lid = r.add(Particle::new(392.0, base_y - 56.0, 11.0, BODY));
+        r.particles[lid].side = side;
+        r.particles[lid].rest_side = side;
+
         r.link(skull, sclera);
         eyes.push(sclera);
         eyes.push(iris);
+        eyes.push(lid);
         overlay_pairs.push((sclera, iris));
-        eye_sides.push((sclera, side));
+        overlay_pairs.push((sclera, lid));
+        lid_pairs.push((sclera, lid));
     }
 
-    let ear_a = r.add(Particle::new(380.0, base_y - 48.0, 9.0, BODY));
-    let ear_b = r.add(Particle::new(394.0, base_y - 44.0, 9.0, BODY));
-    r.link(skull, ear_a);
-    r.link(skull, ear_b);
+    // Ears: three balls a side, in a darker shade, as the breed files have
+    // them. The pair of brown balls that used to sit here read as something
+    // else entirely - eyelids, by the look of it.
+    let mut ears = Vec::new();
+    for side in [-1.0f32, 1.0] {
+        let a = r.add(Particle::new(372.0, base_y - 46.0, 9.0, EAR));
+        let b = r.add(Particle::new(364.0, base_y - 56.0, 7.5, EAR));
+        let c = r.add(Particle::new(380.0, base_y - 58.0, 7.0, EAR));
+        for i in [a, b, c] {
+            r.particles[i].side = 11.0 * side;
+            r.particles[i].rest_side = 11.0 * side;
+        }
+        r.link(skull, a);
+        r.link(a, b);
+        r.link(a, c);
+        ears.extend([a, b, c]);
+    }
 
     // Legs. The front pair hangs off the ball *behind* the neck - the shoulder -
     // and the hind pair off the hips. Getting this the wrong way round is what
@@ -208,14 +233,11 @@ fn build() -> (Ragdoll, Creature) {
     }
 
     // Ears sit either side of the skull.
-    r.particles[ear_a].side = -6.0;
-    r.particles[ear_a].rest_side = -6.0;
-    r.particles[ear_b].side = 6.0;
-    r.particles[ear_b].rest_side = 6.0;
 
-    let mut head = vec![skull, muzzle, nose, ear_a, ear_b];
+    let mut head = vec![skull, muzzle, nose];
+    head.extend(ears);
     head.extend(eyes);
-    (r, Creature { spine, legs, head, tail, eye_overlays: overlay_pairs, eye_sides })
+    (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eye_lids: lid_pairs })
 }
 
 /// The walking controller: owns the clock, the world position, and the pose.
@@ -232,6 +254,10 @@ struct Walker {
     facing: Vec<f32>,
     lag: Vec<f32>,
     walking: bool,
+    /// Blink clock, in seconds, cycling through a short close-and-open.
+    clock: f32,
+    /// 1.0 is a fully open eye, 0.0 fully closed.
+    lid_open: f32,
 }
 
 /// Fastest the animal's body can turn, in radians per second.
@@ -268,6 +294,8 @@ impl Walker {
             facing: vec![body.heading; particles],
             lag,
             walking: true,
+            clock: 0.0,
+            lid_open: 1.0,
         }
     }
 
@@ -294,6 +322,19 @@ impl Walker {
         // Turning happens whether or not the animal is moving - a dog can look
         // round while standing.
         self.turn(dt);
+
+        // A blink every few seconds. Cheap, and it proves the lid is real.
+        self.clock += dt;
+        if self.clock > 3.6 {
+            self.clock = 0.0;
+        }
+        self.lid_open = if self.clock < 0.09 {
+            self.clock / 0.09
+        } else if self.clock < 0.18 {
+            (0.18 - self.clock) / 0.09
+        } else {
+            1.0
+        };
         if !self.walking {
             return;
         }
@@ -324,6 +365,17 @@ impl Walker {
         }
         for (i, &p) in creature.head.iter().enumerate() {
             doll.drive_to(p, Vec2::new(rest.head[i].x, rest.head[i].y + lift), 0.4);
+        }
+
+        // Drop the lid over the eye as it closes. Open, it sits clear above the
+        // eye; closed, it is centred on it.
+        for &(sclera, lid) in &creature.eye_lids {
+            let k = creature.head.iter().position(|&h| h == sclera);
+            let Some(k) = k else { continue };
+            let base = rest.head[k];
+            let r = doll.particles[sclera].radius;
+            let y = base.y + lift - self.lid_open * (r * 2.0 + 3.0);
+            doll.drive_to(lid, Vec2::new(base.x, y), 0.8);
         }
 
         for (i, leg) in creature.legs.iter().enumerate() {
@@ -714,19 +766,27 @@ fn main() -> Result<(), String> {
         // Depth order, nothing else. Painting on top unconditionally is how
         // the eyes ended up showing through the skull when the animal walked
         // away: the far eye is behind the head, and depth has to decide that.
-        let overlay_of: std::collections::HashMap<usize, usize> =
-            creature.eye_overlays.iter().cloned().collect();
+        let overlays_for = |i: usize| -> Vec<usize> {
+            creature
+                .eye_overlays
+                .iter()
+                .filter(|(b, _)| *b == i)
+                .map(|(_, o)| *o)
+                .collect()
+        };
         let is_overlay = |i: usize| creature.eye_overlays.iter().any(|(_, o)| *o == i);
 
-        // An eye is a ball stuck on the side of the head, so only the one on
-        // the viewer's side can be seen. Depth alone was not enough: the head
-        // is a cluster of overlapping balls, not a solid, so a far eye could
-        // still peek between them. Cull by which way it faces.
+        // An eye is visible when it sits nearer to the viewer than the centre
+        // of the head. Testing "which side of the body" instead was wrong: it
+        // hid *both* eyes when the animal faced the camera, where both should
+        // be visible, and showed one even when it faced away.
         let mut hidden: Vec<bool> = vec![false; doll.particles.len()];
-        for &(sclera, side) in &creature.eye_sides {
-            let outward_y = -walker.heading_body.sin() * side.signum();
-            // The viewer looks along +y, so an eye faces us when outward y < 0.
-            if outward_y >= -0.05 {
+        for &(sclera, _) in &creature.eye_lids {
+            // A margin, not a strict comparison. Facing the camera the two eyes
+            // straddle the head centre and a strict test hid one of them; in
+            // profile they sit a full eye-width either side, which the margin
+            // still catches.
+            if screen[sclera].depth - screen[creature.skull].depth > 2.5 {
                 hidden[sclera] = true;
                 for &(base, over) in &creature.eye_overlays {
                     if base == sclera {
@@ -774,7 +834,10 @@ fn main() -> Result<(), String> {
             draw(i, &mut surface);
             // The pair is atomic: rim, body, then the pupil on top of it. It
             // still sorts by the sclera's depth, so the head can hide it.
-            if let Some(&over) = overlay_of.get(&i) {
+            for over in overlays_for(i) {
+                if hidden[over] {
+                    continue;
+                }
                 let p = &doll.particles[over];
                 let r = p.radius.round() as i32;
                 if r >= 1 {
@@ -1008,6 +1071,41 @@ mod walk_tests {
             let d = (p.pos.x - cx).hypot(p.pos.y - cy);
             assert!(d < 260.0, "ball {k} stranded {d:.0} px from the body");
         }
+    }
+
+    /// Frame the creature at a heading and report which eyes are visible.
+    fn visible_eyes(heading: f32) -> Vec<bool> {
+        let (doll, c, _rest, mut w) = rig();
+        w.body.heading = heading;
+        w.heading_body = heading;
+        for f in w.facing.iter_mut() {
+            *f = heading;
+        }
+        let view = View::new(25.0, GROUND);
+        let screen: Vec<_> = doll
+            .particles
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let b = Body { pos: w.body.pos, heading };
+                view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y))
+            })
+            .collect();
+        let skull = screen[c.skull].depth;
+        c.eye_lids
+            .iter()
+            .map(|&(sclera, _)| screen[sclera].depth - skull <= 2.5)
+            .collect()
+    }
+
+    #[test]
+    fn one_eye_in_profile_and_two_from_the_front() {
+        use std::f32::consts::{FRAC_PI_2, PI};
+        assert_eq!(visible_eyes(0.0), vec![false, false], "facing away should show no eyes");
+        let profile = visible_eyes(FRAC_PI_2);
+        assert_eq!(profile.iter().filter(|v| **v).count(), 1, "profile shows one eye: {profile:?}");
+        let front = visible_eyes(PI);
+        assert_eq!(front.iter().filter(|v| **v).count(), 2, "facing the camera shows both: {front:?}");
     }
 
     #[test]
