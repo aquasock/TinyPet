@@ -159,8 +159,8 @@ struct Creature {
     skull: usize,
     /// The sclera of each eye, for the visibility test.
     eyes: Vec<usize>,
-    /// The ear balls: (particle, side sign).
-    ears: Vec<(usize, f32)>,
+    /// The ear balls, an ordinary body segment.
+    ears: Vec<usize>,
     /// (sclera, iris, rest height, side sign) per eye, so the placement can be
     /// tuned while running instead of being baked in.
     eye_parts: Vec<(usize, usize, f32, f32)>,
@@ -238,16 +238,16 @@ fn build() -> (Ragdoll, Creature) {
     // buys a shape we do not need at this fidelity. The tip is deliberately not
     // driven - the solver gives it the flop for free, and it bounces with the
     // gait because the base hangs off the skull.
-    // Ears: one ordinary ball each, placed the way the eye experiment showed
-    // works - on the head's sphere by radius and two angles, pinned, unlinked,
-    // and drawn in front of the head. Everything learned, none of the eye.
-    let mut ear_eyes: Vec<(usize, f32)> = Vec::new();
+    // Ears: an ordinary body segment, in roughly the right place. A ball, a
+    // spring to the skull, drawn like every other ball. No pinning, no bias, no
+    // placement code.
+    let mut ear_balls: Vec<usize> = Vec::new();
     for side in [-1.0f32, 1.0] {
-        let ear = r.add(Particle::new(390.0, base_y - 58.0, 10.0, EAR));
-        r.particles[ear].pinned = true;
+        let ear = r.add(Particle::new(378.0, base_y - 58.0, 10.0, EAR));
         r.particles[ear].side = 10.0 * side;
         r.particles[ear].rest_side = 10.0 * side;
-        ear_eyes.push((ear, side));
+        r.link(skull, ear);
+        ear_balls.push(ear);
     }
 
     // Pull the neck and head back into the body by a fifth. The compression is
@@ -255,7 +255,7 @@ fn build() -> (Ragdoll, Creature) {
     // simply sliding sideways through the chest.
     const SHOULDER: f32 = 332.0;
     let mut pulled: Vec<usize> = vec![spine[3], skull, muzzle, nose];
-    pulled.extend(ear_eyes.iter().map(|&(e, _)| e));
+    pulled.extend(ear_balls.iter().copied());
     for i in pulled {
         let p = &mut r.particles[i];
         p.pos.x = SHOULDER + 0.8 * (p.pos.x - SHOULDER);
@@ -339,8 +339,9 @@ fn build() -> (Ragdoll, Creature) {
     }
 
     let mut head = vec![skull, muzzle, nose];
+    head.extend(ear_balls.iter().copied());
     head.extend(eyes);
-    (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eyes: eye_list, ears: ear_eyes, eye_parts, head_balls })
+    (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eyes: eye_list, ears: ear_balls, eye_parts, head_balls })
 }
 
 /// The walking controller: owns the clock, the world position, and the pose.
@@ -521,20 +522,6 @@ impl Walker {
         }
         let skull_now = doll.particles[creature.skull].pos;
         let skull_rest = rest.head[0];
-        {
-            let sk = doll.particles[creature.skull].pos;
-            let c = self.ear_width.cos();
-            let bx = sk.x + self.ear_radius * self.ear_angle.sin() * c;
-            let by = sk.y - self.ear_radius * self.ear_angle.cos() * c;
-            for &(ear, sign) in &creature.ears {
-                doll.drag_to(ear, Vec2::new(bx, by));
-                if let Some(p) = doll.particles.get_mut(ear) {
-                    p.side = sign * self.ear_radius * self.ear_width.sin();
-                    p.z_bias = self.ear_bias;
-                }
-            }
-        }
-
         for &(sclera, iris, y, sign) in &creature.eye_parts {
             // On the head's surface at the chosen angle, so widening the eyes
             // walks them round the skull instead of through it.
@@ -646,16 +633,6 @@ fn eye_pixel_ok(
         }
     }
     eye_surface < nearest + bias
-}
-
-fn report_ears(w: &Walker) {
-    println!(
-        "ears: angle {:.0} deg  radius {:.1}  width {:.0} deg  bias {:.1}",
-        w.ear_angle.to_degrees(),
-        w.ear_radius,
-        w.ear_width.to_degrees(),
-        w.ear_bias
-    );
 }
 
 fn report_eyes(w: &Walker) {
@@ -841,51 +818,10 @@ fn main() -> Result<(), String> {
                     sdl2::keyboard::Keycode::P => {
                         report(light, steps, tex_idx, textures[tex_idx].0);
                         report_eyes(&walker);
-                        report_ears(&walker);
-                    }
-                    sdl2::keyboard::Keycode::K => {
-                        walker.ear_angle = (walker.ear_angle - 1.0_f32.to_radians()).max(-1.2);
-                        report_ears(&walker);
-                    }
-                    sdl2::keyboard::Keycode::L => {
-                        walker.ear_angle = (walker.ear_angle + 1.0_f32.to_radians()).min(1.2);
-                        report_ears(&walker);
-                    }
-                    sdl2::keyboard::Keycode::H => {
-                        walker.ear_radius = (walker.ear_radius - 1.0).max(10.0);
-                        report_ears(&walker);
-                    }
-                    sdl2::keyboard::Keycode::J => {
-                        walker.ear_radius = (walker.ear_radius + 1.0).min(70.0);
-                        report_ears(&walker);
                     }
                     // Height as an angle round the head's centre, not an offset
                     // from the ground: raising an ear walks it up the sphere,
                     // the way its radius and width already do.
-                    sdl2::keyboard::Keycode::PageUp => {
-                        walker.ear_angle = (walker.ear_angle - 1.0_f32.to_radians()).max(-1.2);
-                        report_ears(&walker);
-                    }
-                    sdl2::keyboard::Keycode::PageDown => {
-                        walker.ear_angle = (walker.ear_angle + 1.0_f32.to_radians()).min(1.2);
-                        report_ears(&walker);
-                    }
-                    sdl2::keyboard::Keycode::N => {
-                        walker.ear_width = (walker.ear_width - 1.0_f32.to_radians()).max(0.0);
-                        report_ears(&walker);
-                    }
-                    sdl2::keyboard::Keycode::M => {
-                        walker.ear_width = (walker.ear_width + 1.0_f32.to_radians()).min(1.4);
-                        report_ears(&walker);
-                    }
-                    sdl2::keyboard::Keycode::U => {
-                        walker.ear_bias = (walker.ear_bias + 0.5).min(20.0);
-                        report_ears(&walker);
-                    }
-                    sdl2::keyboard::Keycode::I => {
-                        walker.ear_bias = (walker.ear_bias - 0.5).max(-40.0);
-                        report_ears(&walker);
-                    }
                     sdl2::keyboard::Keycode::Z => {
                         light.ambient = (light.ambient - 0.05).max(0.0);
                         report(light, steps, tex_idx, textures[tex_idx].0);
@@ -1629,100 +1565,8 @@ mod walk_tests {
         assert_eq!(c.eyes.len(), 2, "two eyes");
         assert_eq!(c.ears.len(), 2, "two ear-eyes");
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
-        assert_eq!(c.head.len(), 7, "skull, muzzle, nose and four eye balls");
-        assert_eq!(doll.particles.len(), 31, "total ball count");
-    }
-
-    #[test]
-    fn changing_the_ear_radius_moves_it_straight_out() {
-        // Reported from play: H and J should move the ears radially out of the
-        // head. With the width as a distance they slid sideways as well.
-        let dir = |w: &Walker, doll: &Ragdoll, c: &Creature| {
-            let sk = &doll.particles[c.skull];
-            let p = &doll.particles[c.ears[0].0];
-            let v = (p.pos.x - sk.pos.x, p.side - sk.side, sk.pos.y - p.pos.y);
-            let len = (v.0 * v.0 + v.1 * v.1 + v.2 * v.2).sqrt().max(1e-6);
-            let _ = w;
-            (v.0 / len, v.1 / len, v.2 / len)
-        };
-        let mut dirs = Vec::new();
-        for radius in [20.0f32, 30.0, 45.0] {
-            let (mut doll, c, rest, mut w) = rig();
-            w.ear_radius = radius;
-            for _ in 0..120 {
-                w.pose(&mut doll, &c, &rest);
-                doll.step(1.0 / 120.0);
-            }
-            dirs.push(dir(&w, &doll, &c));
-        }
-        for d in &dirs[1..] {
-            let dot = d.0 * dirs[0].0 + d.1 * dirs[0].1 + d.2 * dirs[0].2;
-            assert!(dot > 0.999, "direction changed with radius: {d:?} vs {:?}", dirs[0]);
-        }
-    }
-
-    #[test]
-    fn the_ears_sit_on_the_head_sphere() {
-        let (mut doll, c, rest, mut w) = rig();
-        for _ in 0..120 {
-            w.pose(&mut doll, &c, &rest);
-            doll.step(1.0 / 120.0);
-        }
-        let sk = &doll.particles[c.skull];
-        for &(base, _) in &c.ears {
-            let p = &doll.particles[base];
-            let (dx, dl, du) = (p.pos.x - sk.pos.x, p.side - sk.side, sk.pos.y - p.pos.y);
-            let d = (dx * dx + dl * dl + du * du).sqrt();
-            assert!(
-                (d - w.ear_radius).abs() < 0.5,
-                "ear base is {d:.1} from the skull, radius is {:.1}",
-                w.ear_radius
-            );
-        }
-    }
-
-    #[test]
-    fn the_two_ears_are_mirror_images() {
-        // Reported from play: the two ears leaned in different directions. They
-        // are pinned and placed exactly, so they are mirror images by
-        // construction rather than by the solver agreeing with itself.
-        let (mut doll, c, rest, mut w) = rig();
-        for _ in 0..180 {
-            w.pose(&mut doll, &c, &rest);
-            doll.step(1.0 / 120.0);
-        }
-        let (e0, _) = c.ears[0];
-        let (e1, _) = c.ears[1];
-        let (pa, pb) = (doll.particles[e0].pos, doll.particles[e1].pos);
-        assert!(pa.sub(pb).length() < 0.01, "ear positions differ: {pa:?} vs {pb:?}");
-        let (sa, sb) = (doll.particles[e0].side, doll.particles[e1].side);
-        assert!((sa + sb).abs() < 0.01 && sa.abs() > 1.0, "ear sides not mirrored");
-    }
-
-    #[test]
-    fn tuning_the_ears_does_not_move_the_head() {
-        // Reported from play: adjusting the ears dragged the head, the neck and
-        // the spine with them. The ear springs were built at their original
-        // lengths, so driving an ear made them pull on the skull.
-        let settle = |angle: f32| {
-            let (mut doll, c, rest, mut w) = rig();
-            w.ear_angle = angle;
-            for _ in 0..180 {
-                w.pose(&mut doll, &c, &rest);
-                doll.step(1.0 / 120.0);
-            }
-            (doll.particles[c.skull].pos, doll.particles[c.spine[3]].pos)
-        };
-        let (skull_a, neck_a) = settle(-0.35);
-        let (skull_b, neck_b) = settle(0.9);
-        assert!(
-            skull_a.sub(skull_b).length() < 1.0,
-            "skull moved from {skull_a:?} to {skull_b:?}"
-        );
-        assert!(
-            neck_a.sub(neck_b).length() < 1.0,
-            "neck moved from {neck_a:?} to {neck_b:?}"
-        );
+        assert_eq!(c.head.len(), 9, "skull, muzzle, nose, two ears, four eyes");
+        assert_eq!(doll.particles.len(), 29, "total ball count");
     }
 
     #[test]
