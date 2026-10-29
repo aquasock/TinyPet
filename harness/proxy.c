@@ -26,6 +26,27 @@
 typedef const char *(__cdecl *pNameFn)(int);
 static void *find_export(const char *want);
 
+/* In-memory record ring: fill-time work must never touch the filesystem.
+ * The flusher thread writes it out every few seconds. */
+#define RING_REC 72
+#define RING_RECS (64 * 1024)
+static unsigned char *g_ring = NULL;
+static volatile LONG g_ring_pos = 0;
+
+static void dump_ring(void)
+{
+    if (!g_ring) return;
+    LONG pos = g_ring_pos;
+    if (pos > RING_RECS) pos = RING_RECS;
+    HANDLE f = CreateFileA("blocks.bin", GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) return;
+    DWORD n, total = (DWORD)pos * RING_REC;
+    WriteFile(f, g_ring, total, &n, NULL);
+    CloseHandle(f);
+}
+
+
 /* ---------------------------------------------------------------- logging */
 
 static void slog(const char *msg)
@@ -375,7 +396,7 @@ static DWORD WINAPI profiler_thread(LPVOID unused)
 
     for (;;) {
         Sleep(5);
-        if (!g_do_sample) { flush_dispatch(); continue; }   /* ~200 Hz: 1 kHz suspend/resume perturbed the target */
+        if (!g_do_sample) { flush_dispatch(); dump_ring(); continue; }   /* ~200 Hz: 1 kHz suspend/resume perturbed the target */
         if (SuspendThread(h) == (DWORD)-1) continue;
         CONTEXT c;
         c.ContextFlags = CONTEXT_CONTROL;
@@ -404,6 +425,14 @@ static DWORD WINAPI profiler_thread(LPVOID unused)
 static void start_profiler(void)
 {
     char envbuf[8];
+    {
+        char bl[8];
+        if (GetEnvironmentVariableA("PETZ_BLOCKLOG", bl, sizeof(bl)) > 0) {
+            g_ring = (unsigned char *)VirtualAlloc(NULL, (size_t)RING_RECS * RING_REC,
+                        MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+            if (g_ring) slog("blocklog: ring allocated");
+        }
+    }
     if (GetEnvironmentVariableA("PETZ_PROFILE", envbuf, sizeof(envbuf)) > 0) g_do_sample = 1;
     char tr[8];
     if (GetEnvironmentVariableA("PETZ_TRACE", tr, sizeof(tr)) > 0) g_do_sample = g_do_sample ? 1 : 0;
@@ -817,41 +846,27 @@ static void dump_tables(void)
     slog(buf);
 }
 
-static HANDLE g_block_log = INVALID_HANDLE_VALUE;
-
 void fill_probe(void *drawport, void *block)
 {
+    LONG n = InterlockedIncrement(&g_fill_calls);
     /* Recording every fill's render block is opt-in: doing file I/O on the
      * render thread with this frequency crashed the retail game (c0000005 via
      * Verbassert). The safe path is the interval capture further down. */
-    char bl[8];
-    static int blocklog = -1;
-    if (blocklog < 0)
-        blocklog = GetEnvironmentVariableA("PETZ_BLOCKLOG", bl, sizeof(bl)) > 0 ? 1 : 0;
-    if (blocklog && block) {
-        if (g_block_log == INVALID_HANDLE_VALUE)
-            g_block_log = CreateFileA("blocks.bin", GENERIC_WRITE, FILE_SHARE_READ,
-                                      NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (g_block_log != INVALID_HANDLE_VALUE) {
-            unsigned char rec[72];
+    if (g_ring && block) {
+        LONG slot = InterlockedIncrement(&g_ring_pos) - 1;
+        if (slot < RING_RECS) {
+            unsigned char *rec = g_ring + (size_t)slot * RING_REC;
             memcpy(rec, block, 64);
             DWORD dp = (DWORD)(ULONG_PTR)drawport;
             memcpy(rec + 64, &dp, 4);
-            DWORD frame = (DWORD)g_fill_calls;
+            DWORD frame = (DWORD)n;
             memcpy(rec + 68, &frame, 4);
-            DWORD n;
-            WriteFile(g_block_log, rec, sizeof(rec), &n, NULL);
         }
     }
-    LONG n = InterlockedIncrement(&g_fill_calls);
     if (!block) return;
 
-    {
-        char b2[96], *q = b2;
-        lstrcpyA(q, "fill call "); q += lstrlenA(q);
-        q = put_uint(q, (unsigned long)n);
-        *q = 0; slog(b2);
-    }
+    /* No per-call logging: this runs thousands of times a second and a single
+     * slog() here (CreateFile + WriteFile) crashed the retail game. */
 
     if (n == 1) dump_tables();
 
