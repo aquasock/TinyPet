@@ -178,7 +178,7 @@ fn main() {
 
                 let (w, h) = (aw, ah);
                 let mut surface = Surface::new(w, h);
-                for y in 0..h { for x in 0..w { surface.set(x, y, 12); } }
+                for y in 0..h { for x in 0..w { surface.set(x, y, BACKGROUND); } }
                 for b in 0..nballs {
                     let o = start + b * 12;
                     let cx = i16::from_le_bytes(bytes[o..o+2].try_into().unwrap()) as i32;

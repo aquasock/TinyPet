@@ -29,21 +29,29 @@ static void *find_export(const char *want);
 /* In-memory record ring: fill-time work must never touch the filesystem.
  * The flusher thread writes it out every few seconds. */
 #define RING_REC 72
-#define RING_RECS (64 * 1024)
+#define RING_RECS (1024 * 1024)   /* 72 MB: a long session */
 static unsigned char *g_ring = NULL;
 static volatile LONG g_ring_pos = 0;
+static volatile LONG g_ring_flushed = 0;
 
+/* Append only records written since the last flush, so a long session streams
+ * to disk instead of being lost when the ring fills. */
 static void dump_ring(void)
 {
     if (!g_ring) return;
     LONG pos = g_ring_pos;
     if (pos > RING_RECS) pos = RING_RECS;
-    HANDLE f = CreateFileA("blocks.bin", GENERIC_WRITE, FILE_SHARE_READ,
-                           NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    LONG from = g_ring_flushed;
+    if (pos <= from) return;
+
+    HANDLE f = CreateFileA("blocks.bin", FILE_APPEND_DATA, FILE_SHARE_READ,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (f == INVALID_HANDLE_VALUE) return;
-    DWORD n, total = (DWORD)pos * RING_REC;
-    WriteFile(f, g_ring, total, &n, NULL);
+    DWORD n;
+    SetFilePointer(f, 0, NULL, FILE_END);
+    WriteFile(f, g_ring + (size_t)from * RING_REC, (DWORD)(pos - from) * RING_REC, &n, NULL);
     CloseHandle(f);
+    g_ring_flushed = pos;
 }
 
 
@@ -399,7 +407,7 @@ static DWORD WINAPI profiler_thread(LPVOID unused)
         /* Flush at most every 5s. Doing it per tick (200 Hz) wrote megabytes
          * of blocks.bin continuously and dropped the game to ~1 fps. */
         if (!g_do_sample) {
-            if (GetTickCount() - last_flush > 5000) {
+            if (GetTickCount() - last_flush > 2000) {
                 flush_dispatch();
                 dump_ring();
                 last_flush = GetTickCount();

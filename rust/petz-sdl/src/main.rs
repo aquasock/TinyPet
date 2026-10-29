@@ -15,6 +15,8 @@ use petz_core::{fill_disc, Palette, SpanTable, Surface};
 const W: usize = 640;
 const H: usize = 480;
 const FPS: u64 = 30;
+/// Palette index used as the backdrop (a grass green from the game palette).
+const BACKGROUND: u8 = 130;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -167,7 +169,7 @@ fn main() -> Result<(), String> {
         let mut surface = Surface::new(w, h);
         for y in 0..h {
             for x in 0..w {
-                surface.set(x, y, 12);
+                surface.set(x, y, BACKGROUND);
             }
         }
         if frame_idx % 60 == 0 { eprintln!("balls this frame: {}", anim.frames[frame_idx].len()); }
@@ -176,8 +178,12 @@ fn main() -> Result<(), String> {
                 continue;
             }
             if ball.kind == 3 {
-                // Outline is a ring at the body's rect, not a disc.
-                petz_core::fill_ring(&mut surface, &table, ball.cx, ball.cy, ball.w, 1, ball.colour);
+                // Outline: rect is 4px larger than the body's, so the rim is 2px.
+                petz_core::fill_ring(&mut surface, &table, ball.cx, ball.cy, ball.w, 2, ball.colour);
+            } else if ball.kind == 0 {
+                // Iris: drawn last over the pupil, so it must be a ring or the
+                // pupil disappears. Hole sized from the pupil record (w-8).
+                petz_core::fill_ring(&mut surface, &table, ball.cx, ball.cy, ball.w, 4, ball.colour);
             } else {
                 fill_disc(&mut surface, &table, ball.cx, ball.cy, ball.w, ball.colour);
             }
