@@ -31,7 +31,7 @@ use petz_core::gait::{two_bone_ik, Gait, GaitSpec};
 use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
 use petz_core::project::{Body, Projected, Vec3 as WVec3, View};
 use petz_core::shade::{Light, Ramp, Vec3};
-use petz_core::{draw_disc, draw_flat_disc, draw_ring, DepthBuffer, Paint, Palette, SpanTable, Surface};
+use petz_core::{draw_disc, draw_disc_on_sphere, draw_flat_disc, draw_ring, DepthBuffer, Paint, Palette, SpanTable, Surface};
 use std::fs;
 use std::path::PathBuf;
 
@@ -933,6 +933,17 @@ fn main() -> Result<(), String> {
         if std::env::var("PETZ_SWEEP").is_ok() {
             walker.body.heading += 0.35 * frame_dt;
         }
+        if let Ok(h) = std::env::var("PETZ_HEADING") {
+            if let Ok(deg) = h.parse::<f32>() {
+                let rad = deg.to_radians();
+                walker.body.heading = rad;
+                walker.heading_body = rad;
+                for f in walker.facing.iter_mut() {
+                    *f = rad;
+                }
+                walker.moving = 0.0;
+            }
+        }
         let sweep = std::env::var("PETZ_SWEEP").is_ok();
         let moving = if sweep {
             0.0
@@ -1076,11 +1087,13 @@ fn main() -> Result<(), String> {
                         (fx - cx0).powi(2) + (fy - cy0).powi(2) <= re0 * re0
                     }
                 };
-                draw_ring(&mut surface, &mut depth, &table, px, iy,
-                    ((ri as i32 * 2) + 4) as usize, 2, de, -1.0, IRIS_RING, &inside);
-                let ipat = pattern_for(IRIS);
-                draw_disc(&mut surface, &mut depth, &table, px, iy, (ri as i32 * 2) as usize,
-                    de, -1.1, Paint::Shaded { light, pattern: &ipat }, &inside);
+                // Both sit on the sclera's surface, not on a sphere of their
+                // own: a pupil with its own depth is inside the eye it is
+                // painted on, and the sclera hides it.
+                draw_disc_on_sphere(&mut surface, &mut depth, &table, px, iy,
+                    ((ri as i32 * 2) + 4) as usize, cx, cy, re, de, -0.6, IRIS_RING, &inside);
+                draw_disc_on_sphere(&mut surface, &mut depth, &table, px, iy,
+                    (ri as i32 * 2) as usize, cx, cy, re, de, -0.9, IRIS, &inside);
             }
 
             // Shell 1: the lid. Never culled - it is coat colour, so over the

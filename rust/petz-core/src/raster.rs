@@ -147,6 +147,58 @@ pub fn draw_disc(
     }
 }
 
+/// Draw a disc whose depth comes from *another* sphere - a pupil sitting on the
+/// sclera, rather than a sphere of its own.
+///
+/// A small sphere at the same place as a large one is behind that large one's
+/// surface, so drawing a pupil with its own depth hides it inside the eye it is
+/// painted on. The pupil is a texture, not a ball.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_disc_on_sphere(
+    surface: &mut Surface,
+    depth: &mut DepthBuffer,
+    table: &SpanTable,
+    cx: i32,
+    cy: i32,
+    diameter: usize,
+    ref_cx: f32,
+    ref_cy: f32,
+    ref_r: f32,
+    ref_depth: f32,
+    bias: f32,
+    colour: u8,
+    keep: &dyn Fn(i32, i32) -> bool,
+) {
+    let rows = table.rows(diameter);
+    if rows.is_empty() {
+        return;
+    }
+    let top = cy - (diameter as i32 - 1) / 2;
+    let (h, w) = (surface.height(), surface.width());
+    for (row, &width) in rows.iter().enumerate() {
+        if width == 0 {
+            continue;
+        }
+        let y = top + row as i32;
+        if y < 0 || y as usize >= h {
+            continue;
+        }
+        let left = cx - (width as i32 - 1) / 2;
+        for i in 0..width as i32 {
+            let x = left + i;
+            if x < 0 || x as usize >= w || !keep(x, y) {
+                continue;
+            }
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            let dr = (fx - ref_cx).powi(2) + (fy - ref_cy).powi(2);
+            let nz = (1.0 - dr / (ref_r * ref_r)).max(0.0).sqrt();
+            if depth.test_and_set(x as usize, y as usize, ref_depth - nz * ref_r + bias) {
+                surface.set(x as usize, y as usize, colour);
+            }
+        }
+    }
+}
+
 /// A flat disc at a single depth. Used for rims: a backing plate just behind
 /// the ball, rather than a second sphere, because a sphere of a larger radius is
 /// *nearer* at the centre and at the rim alike and ends up winning everywhere.
