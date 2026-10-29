@@ -159,7 +159,7 @@ struct Creature {
     skull: usize,
     /// The sclera of each eye, for the visibility test.
     eyes: Vec<usize>,
-    /// (base, tip, side sign) per ear, so they can be placed and tuned live.
+    /// A second pair of eyes where the ears were: (sclera, iris, side sign).
     ears: Vec<(usize, usize, f32)>,
     /// (sclera, iris, rest height, side sign) per eye, so the placement can be
     /// tuned while running instead of being baked in.
@@ -238,39 +238,25 @@ fn build() -> (Ragdoll, Creature) {
     // buys a shape we do not need at this fidelity. The tip is deliberately not
     // driven - the solver gives it the flop for free, and it bounces with the
     // gait because the base hangs off the skull.
+    // Ears, built as an exact duplicate of an eye: same shells, same colours,
+    // same rules. The eye is the one part of this head that behaves at every
+    // angle, so the ears are not given their own construction.
     let mut ear_parts: Vec<usize> = Vec::new();
-    let mut ear_list: Vec<(usize, usize, f32)> = Vec::new();
+    let mut ear_eyes: Vec<(usize, usize, f32)> = Vec::new();
     for side in [-1.0f32, 1.0] {
-        // On top of the skull rather than behind it, and reaching upwards. The
-        // tips are driven, not left to gravity: a free tip hangs, which is what
-        // made the ears droop instead of stand.
-        // High enough that the base's own centre clears the skull's sphere,
-        // or the head clips the ear it is holding up.
-        let base = r.add(Particle::new(378.0, base_y - 58.0, 9.0, EAR));
-        let tip = r.add(Particle::new(374.0, base_y - 76.0, 6.0, EAR_TIP));
-        for i in [base, tip] {
-            // Pinned and placed exactly, like the eyes. Left to the solver they
-            // settled a couple of pixels apart, so the two tips leaned in
-            // different directions.
+        let sclera = r.add(Particle::new(390.0, base_y - 58.0, 10.0, SCLERA));
+        let iris = r.add(Particle::new(390.0, base_y - 57.0, 6.0, IRIS));
+        for i in [sclera, iris] {
             r.particles[i].pinned = true;
             r.particles[i].side = 10.0 * side;
             r.particles[i].rest_side = 10.0 * side;
-            // Ears sit on the head, so they are drawn as if a little nearer.
-            // Without this the skull's own surface wins wherever they overlap
-            // and the ear looks like it is under the skin.
-            r.particles[i].z_bias = -6.0;
         }
-        // Settle the tip a sixth of the way down into its base, before the link
-        // is made, so the spring is built at the length that actually exists.
-        {
-            let (bx, by) = (r.particles[base].pos.x, r.particles[base].pos.y);
-            let (tx, ty) = (r.particles[tip].pos.x, r.particles[tip].pos.y);
-            r.particles[tip].pos = Vec2::new(tx + 0.15 * (bx - tx), ty + 0.15 * (by - ty));
-        }
-        r.link(skull, base);
-        r.link(base, tip);
-        ear_parts.extend([base, tip]);
-        ear_list.push((base, tip, side));
+        r.particles[iris].rim = IRIS_RING;
+        r.particles[iris].layer = 1;
+        r.link(skull, sclera);
+        r.link(sclera, iris);
+        ear_parts.extend([sclera, iris]);
+        ear_eyes.push((sclera, iris, side));
     }
 
     // Pull the neck and head back into the body by a fifth. The compression is
@@ -364,7 +350,7 @@ fn build() -> (Ragdoll, Creature) {
     let mut head = vec![skull, muzzle, nose];
     head.extend(ear_parts.iter().copied());
     head.extend(eyes);
-    (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eyes: eye_list, ears: ear_list, eye_parts, head_balls })
+    (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eyes: eye_list, ears: ear_eyes, eye_parts, head_balls })
 }
 
 /// The walking controller: owns the clock, the world position, and the pose.
@@ -544,42 +530,18 @@ impl Walker {
         let skull_rest = rest.head[0];
         {
             let sk = doll.particles[creature.skull].pos;
-            for &(base, tip, sign) in &creature.ears {
-                // On the head's sphere, not on a horizontal plane. The width is
-                // an angle round the skull, so widening an ear walks it round
-                // the surface - exactly as the eyes are placed - instead of
-                // sliding it sideways off it.
-                let beta = (self.ear_width / self.ear_radius.max(1.0)).clamp(-1.0, 1.0).asin();
-                let c = beta.cos();
-                let bx = sk.x + self.ear_radius * self.ear_angle.sin() * c;
-                let by = sk.y - self.ear_radius * self.ear_angle.cos() * c;
-                doll.drag_to(base, Vec2::new(bx, by));
-                // The tip leans back and up from the base, then sinks into it.
-                let (mut tx, mut ty) = (bx - 4.0, by - 18.0);
-                tx += self.ear_sink * (bx - tx);
-                ty += self.ear_sink * (by - ty);
-                doll.drag_to(tip, Vec2::new(tx, ty));
-                // Both ears take the bias, so both sit on the head the same way
-                // at every angle. Giving it only to the near ear made them
-                // behave differently: the far one was half-hidden by the skull
-                // and showed as a fragment floating beside it, while the near
-                // one was drawn whole. They are ordered against each other by
-                // the depth buffer, which is the only difference that should
-                // exist between them.
-                for i in [base, tip] {
+            let beta = (self.ear_width / self.ear_radius.max(1.0)).clamp(-1.0, 1.0).asin();
+            let c = beta.cos();
+            let bx = sk.x + self.ear_radius * self.ear_angle.sin() * c;
+            let by = sk.y - self.ear_radius * self.ear_angle.cos() * c;
+            for &(sclera, iris, sign) in &creature.ears {
+                for i in [sclera, iris] {
+                    doll.drag_to(i, Vec2::new(bx, by));
                     if let Some(p) = doll.particles.get_mut(i) {
                         p.side = sign * self.ear_width;
                         p.z_bias = self.ear_bias;
                     }
                 }
-                // Let the springs follow the drive. Held at the lengths they
-                // were built with, moving an ear makes them pull - and the pull
-                // travels from the ear into the skull, the neck and the spine,
-                // so tuning the ears rearranges the whole animal.
-                let d1 = (bx - sk.x).hypot(by - sk.y);
-                let d2 = (tx - bx).hypot(ty - by);
-                doll.set_rest(creature.skull, base, d1);
-                doll.set_rest(base, tip, d2);
             }
         }
 
@@ -1664,11 +1626,13 @@ mod walk_tests {
         // came out with four of everything.
         let (doll, c, _, _) = rig();
         let count = |colour: u8| doll.particles.iter().filter(|p| p.colour == colour).count();
-        assert_eq!(count(SCLERA), 2, "sclerae");
-        assert_eq!(count(IRIS), 2, "pupils");
-        assert_eq!(count(EAR), 2, "ear bases");
-        assert_eq!(count(EAR_TIP), 2, "ear tips");
+        // The ears are a second pair of eyes, so four of each shell.
+        assert_eq!(count(SCLERA), 4, "sclerae");
+        assert_eq!(count(IRIS), 4, "pupils");
+        assert_eq!(count(EAR), 0, "no ear balls");
+        assert_eq!(count(EAR_TIP), 0, "no ear tips");
         assert_eq!(c.eyes.len(), 2, "two eyes");
+        assert_eq!(c.ears.len(), 2, "two ear-eyes");
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
         assert_eq!(c.head.len(), 11, "skull, muzzle, nose, four ear and four eye balls");
         assert_eq!(doll.particles.len(), 31, "total ball count");
