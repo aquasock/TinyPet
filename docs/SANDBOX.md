@@ -23,14 +23,20 @@ Two consequences worth stating plainly:
 ## Running it
 
 ```sh
-cargo test --workspace                  # 37 tests
+cargo test --workspace                  # 60 tests
 cargo run --release -p petz-sdl --bin ragdoll
 ```
 
 Keys: drag to grab, **`W`/`S` forward and back**, **`A`/`D` turn left and right**
-(hold, not toggle), `+/-` speed, `V` view pitch, arrows move the light, `Z`/`X`
-ambience, `[ ]` ramp steps, `T` texture, `,`/`.` spine flex, `H`/`J` eye radius,
-`K`/`L` eye angle, `N`/`M` eyelid drop, `F`/`G` eyelid tilt, `P` print settings, `R` reset, `Space` pause, `Esc` quit.
+(hold, not toggle; `Q`/`E` are the same), `+`/`-` speed, `V` view pitch, arrows
+move the light, `Z`/`X` ambience, `[`/`]` ramp steps, `T` texture, `,`/`.` spine
+flex, `Tab` ball numbers, `P` print settings, `R` reset, `Space` pause, `Esc`
+quit.
+
+There are no controls for the eyes or the ears any more. Both were tuned from
+the keyboard, then the settled numbers were written into the source as defaults
+and the keys removed. An adjustment now is a constant in `build()` or `pose()`,
+not a live tweak.
 
 The big number in the top left is the facing: **0** away from the viewer, **90**
 right, **180** towards the viewer, **270** left. It shows the *actual* facing,
@@ -89,10 +95,12 @@ is asserted as a regression test.
   The breed files carry real coordinates in `[Add Ball]` (`base x y z colour …`)
   and the neck size lives in the packed `SCP` resource, which we have not
   decoded. Until then, proportions are plausible rather than correct.
-- **Ears are removed.** They sat where they covered the eye in profile and got
-  in the way of judging it. They need rebuilding: the reference says three balls
-  a side in a shade darker than the coat (colour 35 on a Dalmatian, 55 on a
-  Great Dane, 95 on a Bulldog).
+- **Ears are two balls a side, not six.** The reference puts six balls in an
+  ear, in a shade darker than the coat (colour 35 on a Dalmatian, 55 on a Great
+  Dane, 95 on a Bulldog). Ours is a base and a lighter tip, which reads as an
+  ear at this fidelity but cannot flop. See "The ears" below.
+- **The ear tip is a cap, not a flop.** It follows the base rigidly because it
+  is pinned with it. Nothing here gives an ear its own swing.
 - **Eyelids are removed.** Petz has no lid geometry — it parameterises one with
   `[Eyelid Color]` plus per-eye "eyelid height" and "eyelid tilt". Our lid-ball
   approximation was visible above the eye and read as a small ear.
@@ -175,10 +183,41 @@ The defaults as of this pass, all tuned by eye against the retail game:
 
 The nose is a single black ball at the tip with **no rim** - an outline in the
 body's brown around a black nose reads as a brown ring - and it sits clear of the
-muzzle's own sphere so the containment rule does not swallow it.
+muzzle's own sphere so the muzzle's depth does not swallow it.
 
-The eye is, as far as we can tell, finished. Live controls: `H`/`J` radius,
-`K`/`L` angle, `U`/`I` depth bias, `N`/`M` lid drop, `F`/`G` lid tilt.
+The eye is, as far as we can tell, finished. Every number above had a live
+control while it was being tuned; the keys are gone and the numbers are
+constants now.
+
+## The ears
+
+Two balls a side, an ordinary body segment in everything but placement: base
+(colour 95, radius 10) and tip (colour 100, radius 7), both pinned, both placed
+by `pose()` every frame from the skull's position:
+
+```
+base  sk.x - 8   sk.y - 30   r 10
+tip   sk.x - 18  sk.y - 44   r 7
+side  +-10       (body-lateral, not screen)
+```
+
+The lateral offset is body-lateral and goes through the projection, so the two
+ears are mirror images facing the camera and share a screen x in profile. Forcing
+that in screen space instead made them the same height at every heading, which is
+wrong - one ear really is above the other at 90 degrees.
+
+Depth is one bias, `z_bias = (skull_depth - 1) - ear_depth`, and it does both
+jobs at once: the ear is past the skull's rim, drawn half a unit behind the
+skull's centre, so the head's outline no longer runs across the ear; and it is
+behind the skull's own surface, a full radius in front, so the head still covers
+the ear where they overlap. That is exactly how two body segments meet, and the
+eyes are the only exemption.
+
+Tried and dropped, so nobody pays for it twice: drawing ears through the eye
+renderer as copies of the eye shells; a bespoke z order for the ears; deriving
+ear height by angle round the skull the way the eye is placed - the eye orbits
+the surface, but an ear is attached at a point. Pinning costs the flop: a pinned
+ear is rigid, and giving it swing means giving it its own solver drive.
 
 ## Next: the nose
 
