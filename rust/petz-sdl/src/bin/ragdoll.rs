@@ -236,6 +236,7 @@ fn build() -> (Ragdoll, Creature) {
     // buys a shape we do not need at this fidelity. The tip is deliberately not
     // driven - the solver gives it the flop for free, and it bounces with the
     // gait because the base hangs off the skull.
+    let mut ear_parts: Vec<usize> = Vec::new();
     for side in [-1.0f32, 1.0] {
         let base = r.add(Particle::new(378.0, base_y - 50.0, 9.0, EAR));
         let tip = r.add(Particle::new(371.0, base_y - 64.0, 7.0, EAR_TIP));
@@ -245,6 +246,25 @@ fn build() -> (Ragdoll, Creature) {
         }
         r.link(skull, base);
         r.link(base, tip);
+        ear_parts.extend([base, tip]);
+    }
+
+    // Pull the neck and head back into the body by a fifth. The compression is
+    // towards the shoulder ball, so the head keeps its proportions instead of
+    // simply sliding sideways through the chest.
+    const SHOULDER: f32 = 332.0;
+    let mut pulled: Vec<usize> = vec![spine[3], skull, muzzle, nose];
+    pulled.extend(ear_parts.iter().copied());
+    for i in pulled {
+        let p = &mut r.particles[i];
+        p.pos.x = SHOULDER + 0.8 * (p.pos.x - SHOULDER);
+    }
+    // Every spring was built against the old layout, so re-solve them from the
+    // arrangement that actually exists now.
+    let pairs: Vec<(usize, usize)> = r.constraints.iter().map(|c| (c.a, c.b)).collect();
+    for (a, b) in pairs {
+        let rest = r.particles[a].pos.sub(r.particles[b].pos).length();
+        r.set_rest(a, b, rest);
     }
 
     // Eyes. The retail data is two balls per eye: a white sclera and a black
