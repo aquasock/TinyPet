@@ -171,6 +171,44 @@ fn build() -> (Ragdoll, Creature) {
         r.particles[lid].rest_side = side;
 
         r.link(skull, sclera);
+        // The pupil and the lid are children of the eye, not of the skull.
+        // Unlinked they were free particles: any grab cleared their drive and
+        // they simply fell out of the head.
+        r.link(sclera, iris);
+        r.link(sclera, lid);
+        eyes.push(sclera);
+        eyes.push(iris);
+        eyes.push(lid);
+        overlay_pairs.push((sclera, iris));
+        overlay_pairs.push((sclera, lid));
+        lid_pairs.push((sclera, lid));
+    }
+
+    // Ears removed for now. They sit on top of the skull and were landing
+    // nearer the viewer than the eye in profile, so they get rebuilt once the
+    // eyes are right - not before, or we cannot tell what is covering what.
+
+    // Eyes. The retail data is two balls per eye: a white sclera and a black
+    // pupil whose *outline* is the iris, in a per-breed colour. There is no
+    // eyelid ball at all - Petz parameterises the lid instead.
+    let mut eyes = Vec::new();
+    let mut overlay_pairs: Vec<(usize, usize)> = Vec::new();
+    let mut lid_pairs: Vec<(usize, usize)> = Vec::new();
+    for side in [-12.0f32, 12.0f32] {
+        let sclera = r.add(Particle::new(394.0, base_y - 34.0, 10.0, SCLERA));
+        let iris = r.add(Particle::new(394.0, base_y - 33.0, 6.0, IRIS));
+        for i in [sclera, iris] {
+            r.particles[i].side = side;
+            r.particles[i].rest_side = side;
+        }
+        r.particles[iris].rim = IRIS_RING;
+        r.particles[iris].layer = 1;
+        // A lid ball, in coat colour, that drops over the eye to blink.
+        let lid = r.add(Particle::new(394.0, base_y - 58.0, 11.0, BODY));
+        r.particles[lid].side = side;
+        r.particles[lid].rest_side = side;
+
+        r.link(skull, sclera);
         eyes.push(sclera);
         eyes.push(iris);
         eyes.push(lid);
@@ -238,7 +276,6 @@ fn build() -> (Ragdoll, Creature) {
     // Ears sit either side of the skull.
 
     let mut head = vec![skull, muzzle, nose];
-    head.extend(ears);
     head.extend(eyes);
     (r, Creature { spine, legs, head, tail, skull, eye_overlays: overlay_pairs, eye_lids: lid_pairs })
 }
