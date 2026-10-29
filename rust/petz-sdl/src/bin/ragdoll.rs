@@ -450,9 +450,9 @@ impl Walker {
             // The values the ears were hand-placed at: 33 from the skull's
             // centre, 14 degrees forward of straight up, tips sunk 35%.
             ear_angle: -14.0_f32.to_radians(),
-            ear_radius: 33.0,
+            ear_radius: 30.0,
             ear_sink: 0.35,
-            ear_bias: -6.0,
+            ear_bias: -30.0,
             ear_width: 17.6_f32.to_radians(),
             moving: 1.0,
         }
