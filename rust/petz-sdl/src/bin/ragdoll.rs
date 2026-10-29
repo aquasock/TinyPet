@@ -267,8 +267,17 @@ impl Walker {
         let bob = (self.gait.phase * std::f32::consts::TAU * 2.0).sin() * 2.0;
         let lift = if self.walking { bob } else { 0.0 };
 
+        let n = creature.spine.len().max(1);
         for (i, &p) in creature.spine.iter().enumerate() {
-            doll.drive_to(p, Vec2::new(rest.spine[i].x, rest.spine[i].y + lift), 0.45);
+            let t = i as f32 / (n - 1).max(1) as f32;
+            let (dv, dl) = if self.walking { self.gait.spine_flex(t) } else { (0.0, 0.0) };
+            // dv is upward, and body y runs down, so it subtracts.
+            doll.drive_to(p, Vec2::new(rest.spine[i].x, rest.spine[i].y + lift - dv), 0.45);
+            // Lateral flex is authored rather than solved: the spine's sway is
+            // a curve through `side`, which the solver does not model.
+            if let Some(part) = doll.particles.get_mut(p) {
+                part.side = dl;
+            }
         }
         for (i, &p) in creature.head.iter().enumerate() {
             doll.drive_to(p, Vec2::new(rest.head[i].x, rest.head[i].y + lift), 0.4);
@@ -407,7 +416,7 @@ fn main() -> Result<(), String> {
 
     println!(
         "drag: left mouse   W: walk/stop   +/-: speed   Q/E: turn   V: view pitch\n\
-         light: arrows   ambience: A/S   steps: [ ]   texture: T   P: settings\n\
+         light: arrows   ambience: A/S   steps: [ ]   texture: T   flex: , .   P: settings\n\
          R: reset   Space: pause   Esc: quit"
     );
     report(light, steps, tex_idx, textures[tex_idx].0);
@@ -428,6 +437,22 @@ fn main() -> Result<(), String> {
                     }
                     sdl2::keyboard::Keycode::Space => paused = !paused,
                     sdl2::keyboard::Keycode::W => walker.walking = !walker.walking,
+                    sdl2::keyboard::Keycode::Comma => {
+                        walker.gait.spec.flex_vertical = (walker.gait.spec.flex_vertical - 0.5).max(0.0);
+                        walker.gait.spec.flex_lateral = (walker.gait.spec.flex_lateral - 0.5).max(0.0);
+                        println!(
+                            "flex v{:.1} l{:.1}",
+                            walker.gait.spec.flex_vertical, walker.gait.spec.flex_lateral
+                        );
+                    }
+                    sdl2::keyboard::Keycode::Period => {
+                        walker.gait.spec.flex_vertical = (walker.gait.spec.flex_vertical + 0.5).min(16.0);
+                        walker.gait.spec.flex_lateral = (walker.gait.spec.flex_lateral + 0.5).min(16.0);
+                        println!(
+                            "flex v{:.1} l{:.1}",
+                            walker.gait.spec.flex_vertical, walker.gait.spec.flex_lateral
+                        );
+                    }
                     sdl2::keyboard::Keycode::Q => {
                         walker.body.heading -= 0.26;
                         println!("heading {:.0} deg", walker.body.heading.to_degrees());
@@ -749,6 +774,35 @@ mod walk_tests {
         let tail = w.facing[*c.tail.last().unwrap()];
         let spread = wrap_pi(head - tail).abs();
         assert!(spread > 0.08, "the body is still rigid: {spread:.3} rad between head and tail");
+    }
+
+    #[test]
+    fn the_spine_bends_while_walking() {
+        // Fit a line through the spine and measure how far its points sit off
+        // it. A rigid spine keeps them on the line; a flexing one does not.
+        let (mut doll, c, rest, mut w) = rig();
+        let dt = 1.0 / 120.0;
+        let mut worst: f32 = 0.0;
+        for _ in 0..240 {
+            w.advance(dt);
+            w.pose(&mut doll, &c, &rest);
+            doll.step(dt);
+            let pts: Vec<(f32, f32)> = c
+                .spine
+                .iter()
+                .map(|&i| (doll.particles[i].pos.x, doll.particles[i].pos.y))
+                .collect();
+            let (x0, y0) = pts[0];
+            let (x1, y1) = pts[pts.len() - 1];
+            let (dx, dy) = (x1 - x0, y1 - y0);
+            let len = (dx * dx + dy * dy).sqrt().max(1e-3);
+            for &(px, py) in &pts[1..pts.len() - 1] {
+                // Perpendicular distance from the root-to-shoulder line.
+                let d = ((px - x0) * dy - (py - y0) * dx).abs() / len;
+                worst = worst.max(d);
+            }
+        }
+        assert!(worst > 0.4, "spine stayed straight; max deviation {worst:.2} px");
     }
 
     #[test]

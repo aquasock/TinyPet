@@ -102,7 +102,7 @@ impl Ramp {
                 if r == 0 && g == 0 && b == 0 {
                     return None;
                 }
-                let (h, s, v) = hsv([r, g, b]);
+                let (h, s, _v) = hsv([r, g, b]);
                 // Same family: close in hue, and not a wildly different
                 // saturation. Grays have no meaningful hue, so treat them by
                 // saturation instead.

@@ -28,11 +28,23 @@ pub struct GaitSpec {
     pub speed: f32,
     /// How high a swinging foot lifts.
     pub step_height: f32,
+    /// How far the middle of the spine lifts and drops with the gait. This is
+    /// what turns a body that translates into a body that *moves*.
+    pub flex_vertical: f32,
+    /// Side-to-side sway of the spine, in the same body units.
+    pub flex_lateral: f32,
 }
 
 impl Default for GaitSpec {
     fn default() -> Self {
-        Self { cycle: 0.85, duty: 0.62, speed: 95.0, step_height: 16.0 }
+        Self {
+            cycle: 0.85,
+            duty: 0.62,
+            speed: 95.0,
+            step_height: 16.0,
+            flex_vertical: 4.0,
+            flex_lateral: 4.5,
+        }
     }
 }
 
@@ -74,6 +86,29 @@ impl Gait {
     /// How far a foot travels along the ground during one stance.
     pub fn stride(&self) -> f32 {
         self.spec.speed * self.spec.duty * self.spec.cycle
+    }
+
+    /// Curvature of the spine at `t`, where 0 is the root (hips) and 1 is the
+    /// shoulders. Returns vertical and lateral offsets in body units.
+    ///
+    /// The window is zero at both ends and widest in the middle, so the spine
+    /// bows rather than translating: hips and shoulders are pinned by the legs,
+    /// the back between them is not. The phase is offset slightly along the
+    /// length, which makes the bend travel from the shoulders toward the hips
+    /// as the animal walks - a standing wave looks mechanical, a travelling one
+    /// does not.
+    pub fn spine_flex(&self, t: f32) -> (f32, f32) {
+        let t = t.clamp(0.0, 1.0);
+        let window = (std::f32::consts::PI * t).sin();
+        if window <= 0.0 {
+            return (0.0, 0.0);
+        }
+        let travel = std::f32::consts::TAU * (self.phase - t * 0.22);
+        let vertical = window * travel.sin() * self.spec.flex_vertical;
+        // A quarter cycle out of step with the lift: the body rolls onto a side
+        // as it rises over it, rather than doing both at once.
+        let lateral = window * (travel + std::f32::consts::FRAC_PI_2).sin() * self.spec.flex_lateral;
+        (vertical, lateral)
     }
 
     /// Foot pose for one leg at the current time.
@@ -130,7 +165,7 @@ mod tests {
     use super::*;
 
     fn gait() -> Gait {
-        Gait::walk(GaitSpec { cycle: 1.0, duty: 0.6, speed: 100.0, step_height: 10.0 })
+        Gait::walk(GaitSpec { cycle: 1.0, duty: 0.6, speed: 100.0, step_height: 10.0, ..GaitSpec::default() })
     }
 
     #[test]
@@ -189,6 +224,37 @@ mod tests {
         let g = gait();
         let d = g.stride();
         assert!((g.foot(0).dx - d * 0.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_spine_bows_in_the_middle_and_not_at_the_ends() {
+        let g = gait();
+        let end_a = g.spine_flex(0.0);
+        let end_b = g.spine_flex(1.0);
+        assert!(end_a.0.abs() < 1e-4 && end_a.1.abs() < 1e-4, "root moved: {end_a:?}");
+        assert!(end_b.0.abs() < 1e-4 && end_b.1.abs() < 1e-4, "shoulder moved: {end_b:?}");
+        // Somewhere through the cycle the middle must be clearly displaced.
+        let mut peak: f32 = 0.0;
+        let mut g2 = g.clone();
+        for _ in 0..200 {
+            let mid = g2.spine_flex(0.5);
+            peak = peak.max(mid.0.abs().max(mid.1.abs()));
+            g2.advance(0.01);
+        }
+        assert!(peak > 1.0, "spine barely flexed: {peak}");
+    }
+
+    #[test]
+    fn the_flex_travels_along_the_spine() {
+        // Two points along the back must not be in phase, or it is a standing
+        // wave and reads as a shudder.
+        let g = gait();
+        let front = g.spine_flex(0.75);
+        let back = g.spine_flex(0.25);
+        assert!(
+            (front.0 - back.0).abs() > 0.5,
+            "front and back flexed together: {front:?} vs {back:?}"
+        );
     }
 
     #[test]
