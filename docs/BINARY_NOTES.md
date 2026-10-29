@@ -534,6 +534,23 @@ Colour and surface, with the file's own help text:
 (128x64), `HAIR6.BMP`, all 8bpp. `Catz 4 Rez.dll` separately carries fur
 pattern textures (`CALI2`, `MOTTLED2`, `MOTTED5`, `HAIR4`, `CATZCORNER`).
 
+**[verified] Texture sampling is integer, nearest-neighbour, with wrapping.**
+`XDrawPort::_initTextureDrawing` (RVA `0x39f10`) is 369 instructions with
+**zero x87 operations**. The UV maths is signed fixed point:
+
+```
+439fb4:  and edx,0x7f      ; rounding correction for a signed /128
+439fd4:  sar eax,0x7       ; >> 7  -> divide by 128
+439fef:  add ebx,eax       ; wrap u by texture width
+439ff1:  js  439fef
+43a045:  add ebp,eax       ; wrap v by texture height
+43a047:  js  43a045
+```
+
+The divisor is 128 and the textures are 128 px wide. There is no filter, no
+blend and no float anywhere in the sampling path, so a port can reproduce it
+exactly with integer arithmetic.
+
 **[inferred]** So a ball's colour is a **single palette index** from the LNZ,
 and the per-pixel variation (~19 indices clustered around a base) comes from
 sampling a texture as a shade/height map and offsetting that index. That fits the

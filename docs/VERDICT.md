@@ -85,8 +85,12 @@ GPU feature dependence.
   ramp-shaded and textured, but the *offset function* that chooses a ramp index
   per pixel has not been derived. That function is where the remaining risk
   sits, and it is likely the x87 setup arithmetic noted in BINARY_NOTES.
-- **Fur pattern mapping** (`XFurInfo`) and the texture path
-  (`SetBallTextureInfo`) remain unexamined beyond observing that they exist.
+- **The texture path is understood but not fully reproduced.** Sampling is
+  integer fixed-point with wrapping and no filtering (`_initTextureDrawing`,
+  0 x87 ops); the LNZ supplies per-ball colour indices and texture ids. What is
+  not yet derived is the exact texture-byte -> index-offset step.
+- **Ball geometry from `BDT`** (493 entries) is not decoded, so per-frame poses
+  and scales cannot be reproduced yet.
 - **Two balls per capture.** The isolation method diffs consecutive fills, and
   the interval held two overlapping balls. They separate cleanly by index, but
   no single isolated call has been captured.
