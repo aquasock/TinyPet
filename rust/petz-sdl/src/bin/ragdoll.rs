@@ -31,7 +31,7 @@ use petz_core::gait::{two_bone_ik, Gait, GaitSpec};
 use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
 use petz_core::project::{Body, Projected, Vec3 as WVec3, View};
 use petz_core::shade::{Light, Ramp, Vec3};
-use petz_core::{fill_disc, fill_disc_masked, fill_ring, Palette, SpanTable, Surface};
+use petz_core::{fill_disc, fill_disc_masked, fill_ring_masked, Palette, SpanTable, Surface};
 use std::fs;
 use std::path::PathBuf;
 
@@ -1182,8 +1182,10 @@ fn main() -> Result<(), String> {
             let lid_pattern = pattern_for(BODY);
             shade_disc_pattern_masked(&mut surface, &table, ix, iy,
                 (((re as i32 * 2) + 4) as usize).min(255), light, &lid_pattern, &lid_clip);
-            fill_ring(&mut surface, &table, ix, iy,
-                (((re as i32 * 2) + 4) as usize).min(255), 2, OUTLINE);
+            // The rim needs the same clip as the fill. Drawn unmasked it was
+            // the one part of the eye that never got occluded.
+            fill_ring_masked(&mut surface, &table, ix, iy,
+                (((re as i32 * 2) + 4) as usize).min(255), 2, OUTLINE, &lid_clip);
         }
 
         let rgb = palette.to_rgb(&surface);

@@ -101,6 +101,50 @@ pub fn fill_disc_masked(
     }
 }
 
+/// As `fill_ring`, but `keep` is asked about every pixel first.
+pub fn fill_ring_masked(
+    surface: &mut crate::surface::Surface,
+    table: &SpanTable,
+    cx: i32,
+    cy: i32,
+    diameter: usize,
+    thickness: usize,
+    colour: u8,
+    keep: &dyn Fn(i32, i32) -> bool,
+) {
+    let rows = table.rows(diameter);
+    let t = thickness.max(1);
+    for (row, &width) in rows.iter().enumerate() {
+        if width == 0 {
+            continue;
+        }
+        let (y, left, len) = row_span(cx, cy, diameter, row, width);
+        if y < 0 {
+            continue;
+        }
+        let w = len as i32;
+        let solid = row < t || row + t >= rows.len() || (w as usize) <= 2 * t;
+        if solid {
+            for i in 0..w {
+                let x = left + i;
+                if keep(x, y) {
+                    surface.set(x.max(0) as usize, y as usize, colour);
+                }
+            }
+        } else {
+            for i in 0..t as i32 {
+                if keep(left + i, y) {
+                    surface.set((left + i).max(0) as usize, y as usize, colour);
+                }
+                let x = left + w - t as i32 + i;
+                if keep(x, y) {
+                    surface.set(x.max(0) as usize, y as usize, colour);
+                }
+            }
+        }
+    }
+}
+
 /// Draw a ring of `thickness` pixels inside the silhouette of a disc.
 ///
 /// `XFillOutlineCircle` receives the same render block as the body fill - same
