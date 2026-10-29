@@ -98,8 +98,13 @@ fn build() -> (Ragdoll, Creature) {
 
     // Everything below is in *body* coordinates: x is forward, y is down from
     // the body's own frame (so `GROUND` is the floor), and `side` is lateral.
-    let spacing = 26.0;
-    let spine_r = [24.0, 23.0, 22.0, 21.0, 20.0];
+    //
+    // Four balls, not five: hips, two along the back, and the neck at the
+    // front. The neck is a spine ball rather than a separate link, because an
+    // extra ball there put the head a body-length away from the shoulders and
+    // the head read as detached.
+    let spacing = 28.0;
+    let spine_r = [24.0, 23.0, 22.0, 20.0];
     let mut spine = Vec::new();
     for i in 0..spine_r.len() {
         let fwd = 276.0 + i as f32 * spacing;
@@ -113,35 +118,36 @@ fn build() -> (Ragdoll, Creature) {
         r.constraints.push(petz_core::Constraint::soft(spine[i], spine[i + 2], rest, 0.7));
     }
     {
-        let rest = r.particles[spine[0]].pos.sub(r.particles[spine[4]].pos).length();
-        r.constraints.push(petz_core::Constraint::soft(spine[0], spine[4], rest, 0.5));
+        let last = *spine.last().unwrap();
+        let rest = r.particles[spine[0]].pos.sub(r.particles[last].pos).length();
+        r.constraints.push(petz_core::Constraint::soft(spine[0], last, rest, 0.5));
     }
 
+    // Head, hanging directly off the neck ball.
     let base_y = GROUND - 68.0;
-    let last = *spine.last().unwrap();
-    let neck = r.add(Particle::new(408.0, base_y - 12.0, 17.0, BODY));
-    let skull = r.add(Particle::new(426.0, base_y - 28.0, 26.0, BODY));
-    let muzzle = r.add(Particle::new(447.0, base_y - 18.0, 13.0, LIGHT));
-    let nose = r.add(Particle::new(457.0, base_y - 23.0, 5.0, DARK));
-    r.link(last, neck);
+    let neck = *spine.last().unwrap();
+    let skull = r.add(Particle::new(386.0, base_y - 26.0, 26.0, BODY));
+    let muzzle = r.add(Particle::new(406.0, base_y - 16.0, 13.0, LIGHT));
+    let nose = r.add(Particle::new(416.0, base_y - 21.0, 5.0, DARK));
     r.link(neck, skull);
     r.link(skull, muzzle);
     r.link(muzzle, nose);
-    r.link(skull, spine[3]);
-    r.link(neck, spine[3]);
+    // A second brace, so the head cannot nod away from the shoulders.
+    r.link(skull, spine[spine.len() - 2]);
 
-    let ear_a = r.add(Particle::new(420.0, base_y - 50.0, 9.0, BODY));
-    let ear_b = r.add(Particle::new(435.0, base_y - 46.0, 9.0, BODY));
+    let ear_a = r.add(Particle::new(380.0, base_y - 48.0, 9.0, BODY));
+    let ear_b = r.add(Particle::new(394.0, base_y - 44.0, 9.0, BODY));
     r.link(skull, ear_a);
     r.link(skull, ear_b);
 
-    // Legs. A pair shares its forward position and differs only in `side` -
-    // which is exactly what a side view cannot show and a body transform can.
+    // Legs. The front pair hangs off the ball *behind* the neck - the shoulder -
+    // and the hind pair off the hips. Getting this the wrong way round is what
+    // made the front legs look like they were attached to the head.
     let legs_spec: [(f32, f32, f32); 4] = [
-        (300.0, 9.0, 1.0),   // left front
-        (300.0, -9.0, 1.0),  // right front
-        (372.0, 9.0, -1.0),  // left hind
-        (372.0, -9.0, -1.0), // right hind
+        (332.0, 9.0, 1.0),   // left front
+        (332.0, -9.0, 1.0),  // right front
+        (276.0, 9.0, -1.0),  // left hind
+        (276.0, -9.0, -1.0), // right hind
     ];
     let mut legs = Vec::new();
     for (fwd, side, bend) in legs_spec {
@@ -151,7 +157,8 @@ fn build() -> (Ragdoll, Creature) {
         for i in [hip, knee, foot] {
             r.particles[i].side = side;
         }
-        r.link(spine[if fwd < 350.0 { 1 } else { 3 }], hip);
+        let attach = if fwd > 300.0 { spine[spine.len() - 2] } else { spine[0] };
+        r.link(attach, hip);
         r.link(hip, knee);
         r.link(knee, foot);
         legs.push(Leg { hip, knee, foot, bend, rest: Vec2::new(fwd, GROUND) });
@@ -171,7 +178,7 @@ fn build() -> (Ragdoll, Creature) {
     r.particles[ear_a].side = -6.0;
     r.particles[ear_b].side = 6.0;
 
-    let head = vec![neck, skull, muzzle, nose, ear_a, ear_b];
+    let head = vec![skull, muzzle, nose, ear_a, ear_b];
     (r, Creature { spine, legs, head, tail })
 }
 
@@ -589,8 +596,10 @@ fn main() -> Result<(), String> {
             let p = &mut walker.body.pos;
             if p.y > 140.0 { p.y = -520.0; }
             if p.y < -560.0 { p.y = 100.0; }
-            if p.x > 760.0 { p.x = -120.0; }
-            if p.x < -160.0 { p.x = 720.0; }
+            // x maps straight to screen x, so the wrap has to stay inside the
+            // visible width or the animal spends half its time off-screen.
+            if p.x > 620.0 { p.x = -30.0; }
+            if p.x < -50.0 { p.x = 590.0; }
         }
 
         // Place every ball in the world and project it. The z we get back is
