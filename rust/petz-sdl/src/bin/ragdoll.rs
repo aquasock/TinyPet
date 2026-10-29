@@ -156,9 +156,9 @@ fn build() -> (Ragdoll, Creature) {
     let mut eyes = Vec::new();
     let mut overlay_pairs: Vec<(usize, usize)> = Vec::new();
     let mut lid_pairs: Vec<(usize, usize)> = Vec::new();
-    for side in [-9.0f32, 9.0f32] {
-        let sclera = r.add(Particle::new(392.0, base_y - 32.0, 10.0, SCLERA));
-        let iris = r.add(Particle::new(392.0, base_y - 31.0, 6.0, IRIS));
+    for side in [-12.0f32, 12.0f32] {
+        let sclera = r.add(Particle::new(394.0, base_y - 34.0, 10.0, SCLERA));
+        let iris = r.add(Particle::new(394.0, base_y - 33.0, 6.0, IRIS));
         for i in [sclera, iris] {
             r.particles[i].side = side;
             r.particles[i].rest_side = side;
@@ -166,7 +166,7 @@ fn build() -> (Ragdoll, Creature) {
         r.particles[iris].rim = IRIS_RING;
         r.particles[iris].layer = 1;
         // A lid ball, in coat colour, that drops over the eye to blink.
-        let lid = r.add(Particle::new(392.0, base_y - 56.0, 11.0, BODY));
+        let lid = r.add(Particle::new(394.0, base_y - 58.0, 11.0, BODY));
         r.particles[lid].side = side;
         r.particles[lid].rest_side = side;
 
@@ -184,12 +184,15 @@ fn build() -> (Ragdoll, Creature) {
     // else entirely - eyelids, by the look of it.
     let mut ears = Vec::new();
     for side in [-1.0f32, 1.0] {
-        let a = r.add(Particle::new(372.0, base_y - 46.0, 9.0, EAR));
-        let b = r.add(Particle::new(364.0, base_y - 56.0, 7.5, EAR));
-        let c = r.add(Particle::new(380.0, base_y - 58.0, 7.0, EAR));
+        // On top of the skull and slightly behind it. They used to sit back at
+        // x=372, level with the eyes, where in profile they were nearer the
+        // viewer than the eye and covered it.
+        let a = r.add(Particle::new(378.0, base_y - 58.0, 9.0, EAR));
+        let b = r.add(Particle::new(370.0, base_y - 68.0, 7.5, EAR));
+        let c = r.add(Particle::new(386.0, base_y - 70.0, 7.0, EAR));
         for i in [a, b, c] {
-            r.particles[i].side = 11.0 * side;
-            r.particles[i].rest_side = 11.0 * side;
+            r.particles[i].side = 10.0 * side;
+            r.particles[i].rest_side = 10.0 * side;
         }
         r.link(skull, a);
         r.link(a, b);
@@ -505,6 +508,9 @@ fn main() -> Result<(), String> {
     // Projected positions from the last frame; the picker works in screen space.
     let mut screen: Vec<Projected> = Vec::new();
 
+    let mut sweep_t = 0.0f32;
+    let mut sweep_last = Instant::now();
+    let mut frame_no = 0u32;
     let mut events = sdl.event_pump()?;
     let mut paused = false;
     let step = 1.0 / 120.0;
@@ -854,6 +860,25 @@ fn main() -> Result<(), String> {
                     fill_disc(&mut surface, &table, cx, cy, (((r * 2) + 4) as usize).min(255), rim);
                 }
                 draw(over, &mut surface);
+            }
+        }
+
+        if std::env::var("PETZ_SWEEP").is_ok() {
+            sweep_t += (now - sweep_last).as_secs_f32().min(0.1);
+            sweep_last = now;
+            walker.walking = false;
+            walker.body.heading = sweep_t * 0.35; // 20 deg per second
+            frame_no += 1;
+            if frame_no % 5 == 0 {
+                let iris = surface.pixels().iter().filter(|c| **c == IRIS_RING).count();
+                let pupil = surface.pixels().iter().filter(|c| **c == IRIS).count();
+                println!(
+                    "sweep heading={:.0} facing={:.0} iris={} pupil={}",
+                    walker.body.heading.to_degrees() % 360.0,
+                    walker.heading_body.to_degrees(),
+                    iris,
+                    pupil
+                );
             }
         }
 
