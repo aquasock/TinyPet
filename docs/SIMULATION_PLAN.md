@@ -128,5 +128,39 @@ remakes die.
    and `petz-headless`, loading one `.pet` and rendering it via the decoded
    renderer path.
 
+### Profile, first results
+
+`perf` is unusable here (`perf_event_paranoid=4`, no sudo), so the shim samples
+the main thread's EIP at ~1 kHz and histograms it; `tools/profile-report.py` maps
+buckets onto the export table, which is a free symbol map.
+
+A few minutes of live play, 2,680 samples, **110 distinct methods hit**:
+
+```
+17.65%  Vertex4List::CalcOffsetTable
+14.37%  XDrawPort::XDrawLine
+10.60%  XDrawPort::XFillEmbossCircle
+10.41%  Filmstrip::DrawFilmstripImage
+ 6.42%  XBallz::SetBallTextureInfo
+ 5.00%  XDrawPort::XFillNormalCircle
+ 4.33%  XSpeciesInfo::IsAHeadBall
+ 3.21%  XBallz::DisplayBallzFrame
+ 2.13%  XBallz::sRotatePoint
+ 1.94%  XDrawPort::XDrawClipCircle
+```
+
+Three things fall out of that:
+
+1. **110 methods covered a whole session.** Not 1,500. The behavioural core is
+   real, but a normal play session touches a small slice of it.
+2. **Rendering dominates even during play.** Goal, Plan and Emotion methods do
+   not appear in the top 22 at all - the simulation is cheap per tick, or was
+   idle. (The session was in demo mode, which limits interactions; that likely
+   suppressed behaviour.)
+3. **The shading passes have names.** `XFillEmbossCircle`,
+   `XFillNormalCircle`, `XFillOutlineCircle`, `Vertex4List::CalcOffsetTable` -
+   these are the stages that turn a flat disc into a lit ball, and they are now
+   the top of the rendering worklist rather than a mystery.
+
 Step 1 is the one that changes the plan's shape. Until it's done, every
 scheduling estimate is a guess.

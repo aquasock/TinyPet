@@ -277,6 +277,76 @@ static BOOL WINAPI hook_DeleteObject(HGDIOBJ obj)
     return real_DeleteObject ? real_DeleteObject(obj) : TRUE;
 }
 
+/* ------------------------------------------------------------- profiler */
+/* perf is unusable here (perf_event_paranoid=4, no sudo), so we sample the main
+ * thread's EIP from inside the process. Coverage, not exact timing: 1 kHz over
+ * a session is plenty to rank which of the 5,719 methods actually run. */
+
+#define PROF_BASE 0x400000u
+#define PROF_SIZE 0x200000u
+#define PROF_SLOTS (PROF_SIZE / 4)
+
+static unsigned int *g_hist = NULL;
+static DWORD g_main_tid = 0;
+static volatile LONG g_prof_on = 0;
+
+typedef DWORD (WINAPI *pTimeBeginPeriod)(UINT);
+typedef DWORD (WINAPI *pTimeEndPeriod)(UINT);
+
+static DWORD WINAPI profiler_thread(LPVOID unused)
+{
+    (void)unused;
+    /* Wine's Sleep(1) is coarse; ask for 1 ms timer resolution so the sampler
+     * actually runs near 1 kHz instead of ~10 Hz. */
+    HMODULE winmm = LoadLibraryA("winmm.dll");
+    pTimeBeginPeriod begin = winmm ? (pTimeBeginPeriod)GetProcAddress(winmm, "timeBeginPeriod") : NULL;
+    if (begin) begin(1);
+    HANDLE h = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION,
+                          FALSE, g_main_tid);
+    if (!h) { slog("profiler: cannot open main thread"); return 1; }
+
+    DWORD last_flush = GetTickCount();
+    for (;;) {
+        Sleep(1);
+        if (SuspendThread(h) == (DWORD)-1) continue;
+        CONTEXT c;
+        c.ContextFlags = CONTEXT_CONTROL;
+        if (GetThreadContext(h, &c)) {
+            DWORD ip = (DWORD)c.Eip;
+            if (ip >= PROF_BASE && ip < PROF_BASE + PROF_SIZE)
+                g_hist[(ip - PROF_BASE) >> 2]++;
+        }
+        ResumeThread(h);
+
+        if (GetTickCount() - last_flush > 5000) {
+            last_flush = GetTickCount();
+            HANDLE f = CreateFileA("profile.bin", GENERIC_WRITE, FILE_SHARE_READ,
+                                   NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (f != INVALID_HANDLE_VALUE) {
+                DWORD n;
+                WriteFile(f, g_hist, PROF_SLOTS * 4, &n, NULL);
+                CloseHandle(f);
+            }
+        }
+    }
+    return 0;
+}
+
+static void start_profiler(void)
+{
+    char envbuf[8];
+    if (GetEnvironmentVariableA("PETZ_PROFILE", envbuf, sizeof(envbuf)) == 0) return;
+
+    g_hist = (unsigned int *)VirtualAlloc(NULL, PROF_SLOTS * 4,
+                                          MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!g_hist) { slog("profiler: no memory"); return; }
+
+    g_main_tid = GetCurrentThreadId();
+    HANDLE t = CreateThread(NULL, 0, profiler_thread, NULL, 0, NULL);
+    if (t) { CloseHandle(t); g_prof_on = 1; slog("profiler: sampling main thread"); }
+    else slog("profiler: thread create failed");
+}
+
 /* ------------------------------------------------------------- palette */
 
 typedef HPALETTE (WINAPI *pCreatePalette)(const LOGPALETTE *);
@@ -663,6 +733,7 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
     (void)reserved;
     if (reason == DLL_PROCESS_ATTACH) {
         slog("proxy attach");
+        start_profiler();
         install_hooks();
         /* The inline hook rewrites game code. It is for controlled experiments
          * only; enabled explicitly so a normal session runs untouched. */
