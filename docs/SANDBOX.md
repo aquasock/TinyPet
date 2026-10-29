@@ -30,7 +30,7 @@ cargo run --release -p petz-sdl --bin ragdoll
 Keys: drag to grab, **`W`/`S` forward and back**, **`A`/`D` turn left and right**
 (hold, not toggle), `+/-` speed, `V` view pitch, arrows move the light, `Z`/`X`
 ambience, `[ ]` ramp steps, `T` texture, `,`/`.` spine flex, `H`/`J` eye radius,
-`K`/`L` eye angle, `P` print settings, `R` reset, `Space` pause, `Esc` quit.
+`K`/`L` eye angle, `N`/`M` eyelid drop, `F`/`G` eyelid tilt, `P` print settings, `R` reset, `Space` pause, `Esc` quit.
 
 The big number in the top left is the facing: **0** away from the viewer, **90**
 right, **180** towards the viewer, **270** left. It shows the *actual* facing,
@@ -130,11 +130,22 @@ vanishing at the wrong angle:
    `radius * cos(angle +/- heading)` - radius-independent, so width can no
    longer flip an eye on or off.
 
-The eye is now one unit drawn in order - outline, sclera, iris ring, pupil -
-every layer through the same per-pixel clip, so all four go behind the head
-together. Placement is by angle round the head (27 degrees) and radius (22)
-against an 18-pixel cranium, both live-tunable, with a depth bias in the eye's
-favour on top.
+The eye is built the way the original builds it: three nested shells, outside in.
+
+1. **Eyelid** - a line across the eye dividing coat colour from open eye. Drawn
+   last, so it covers the sphere and the pupil. This is what lets the eye read
+   as an eye when the pupil has slid out of sight, and what will carry
+   expressions.
+2. **Sclera** - a white sphere drawn as a *full circle*, clipped only by the
+   head. It never rotates, so it never pops.
+3. **Pupil and iris** - one texture, sliding inside the sphere at
+   `radius * sin(facing)`, clipped by the sphere's own rim.
+
+That third point is the whole trick, and it is why the original's eyes never
+popped: the sphere's rim clips the pupil, rather than the head clipping the eye.
+
+Placement is by angle round the head (27 degrees) and radius (22) against an
+18-pixel cranium, with a depth bias in the eye's favour available on top.
 
 ## Reference findings worth keeping
 

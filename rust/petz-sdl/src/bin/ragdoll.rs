@@ -326,6 +326,10 @@ struct Walker {
     /// threshold: higher keeps the eye visible a little longer, at the cost of
     /// it occasionally winning against the head where it should not.
     eye_bias: f32,
+    /// Outer shell: how far the eyelid has dropped across the eye, 0 open and
+    /// 1 closed, and the tilt of the line that divides lid from open eye.
+    lid_drop: f32,
+    lid_tilt: f32,
     /// Last movement input, so the pose knows whether to animate a gait.
     moving: f32,
 }
@@ -371,6 +375,8 @@ impl Walker {
             eye_angle: 27.0_f32.to_radians(),
             eye_radius: 22.0,
             eye_bias: 1.5,
+            lid_drop: 0.26,
+            lid_tilt: 0.14,
             moving: 1.0,
         }
     }
@@ -537,12 +543,37 @@ fn elevate_light(dir: Vec3, degrees: f32) -> Vec3 {
     Vec3::from_angles(yaw, pitch)
 }
 
+/// Is the eye's surface at this pixel in front of the nearest head surface?
+/// Shared by the sphere, the pupil and the lid so all three shells are clipped
+/// against exactly the same thing.
+fn eye_pixel_ok(
+    geo: &[(f32, f32, f32, f32)],
+    x: f32,
+    y: f32,
+    eye_surface: f32,
+    bias: f32,
+) -> bool {
+    let mut nearest = f32::INFINITY;
+    for &(hx, hy, hr, hd) in geo {
+        let d2 = (x - hx).powi(2) + (y - hy).powi(2);
+        if d2 <= hr * hr {
+            let surface = hd - (hr * hr - d2).max(0.0).sqrt();
+            if surface < nearest {
+                nearest = surface;
+            }
+        }
+    }
+    eye_surface < nearest + bias
+}
+
 fn report_eyes(w: &Walker) {
     println!(
-        "eyes: angle {:.0} deg  radius {:.1}  bias {:.1}",
+        "eyes: angle {:.0} deg  radius {:.1}  bias {:.1}  lid {:.2} tilt {:.2}",
         w.eye_angle.to_degrees(),
         w.eye_radius,
-        w.eye_bias
+        w.eye_bias,
+        w.lid_drop,
+        w.lid_tilt
     );
 }
 
@@ -723,6 +754,22 @@ fn main() -> Result<(), String> {
                     }
                     sdl2::keyboard::Keycode::J => {
                         walker.eye_radius = (walker.eye_radius + 1.0).min(60.0);
+                        report_eyes(&walker);
+                    }
+                    sdl2::keyboard::Keycode::N => {
+                        walker.lid_drop = (walker.lid_drop - 0.05).max(0.0);
+                        report_eyes(&walker);
+                    }
+                    sdl2::keyboard::Keycode::M => {
+                        walker.lid_drop = (walker.lid_drop + 0.05).min(1.0);
+                        report_eyes(&walker);
+                    }
+                    sdl2::keyboard::Keycode::F => {
+                        walker.lid_tilt = (walker.lid_tilt - 0.03).max(-0.6);
+                        report_eyes(&walker);
+                    }
+                    sdl2::keyboard::Keycode::G => {
+                        walker.lid_tilt = (walker.lid_tilt + 0.03).min(0.6);
                         report_eyes(&walker);
                     }
                     sdl2::keyboard::Keycode::U => {
@@ -1013,21 +1060,14 @@ fn main() -> Result<(), String> {
             let de = screen[sclera].depth;
 
             // Clip anything drawn for this eye to the outside of the head.
+            let bias = walker.eye_bias;
             let head_clip = {
                 let geo = head_geo.clone();
                 move |x: i32, y: i32| -> bool {
                     let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
                     let d2 = (fx - cx).powi(2) + (fy - cy).powi(2);
                     let eye_surface = de - (re * re - d2).max(0.0).sqrt();
-                    let mut nearest = f32::INFINITY;
-                    for &(hx, hy, hr, hd) in &geo {
-                        let dh = (fx - hx).powi(2) + (fy - hy).powi(2);
-                        if dh <= hr * hr {
-                            let s2 = hd - (hr * hr - dh).max(0.0).sqrt();
-                            if s2 < nearest { nearest = s2; }
-                        }
-                    }
-                    eye_surface < nearest + walker.eye_bias
+                    eye_pixel_ok(&geo, fx, fy, eye_surface, bias)
                 }
             };
 
@@ -1066,6 +1106,32 @@ fn main() -> Result<(), String> {
             let iris_pattern = pattern_for(IRIS);
             shade_disc_pattern_masked(&mut surface, &table, px, iy,
                 (ri as i32 * 2) as usize, light, &iris_pattern, &clip);
+
+            // Shell 1, outermost: the eyelid. A line across the eye dividing
+            // coat colour from open eye, so the eye still reads as an eye when
+            // the pupil has slid out of sight. Drawn last, so it covers both the
+            // white and the pupil.
+            let drop = walker.lid_drop.clamp(0.0, 1.0);
+            let tilt = walker.lid_tilt;
+            let line = re * (1.0 - 2.0 * drop);
+            let lid_clip = {
+                let geo = head_geo.clone();
+                move |x: i32, y: i32| -> bool {
+                    let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                    let (ux, uy) = (fx - cx, fy - cy);
+                    if ux * ux + uy * uy > re * re {
+                        return false;
+                    }
+                    if uy >= -(line + ux * tilt.tan()) {
+                        return false;
+                    }
+                    let eye_surface = de - (re * re - (ux * ux + uy * uy)).max(0.0).sqrt();
+                    eye_pixel_ok(&geo, fx, fy, eye_surface, bias)
+                }
+            };
+            let lid_pattern = pattern_for(BODY);
+            shade_disc_pattern_masked(&mut surface, &table, ix, iy,
+                (re as i32 * 2) as usize, light, &lid_pattern, &lid_clip);
         }
 
         let rgb = palette.to_rgb(&surface);
