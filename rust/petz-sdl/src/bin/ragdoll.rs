@@ -1117,6 +1117,18 @@ fn main() -> Result<(), String> {
         // the eye from winking out of existence.
         for &(sclera, _iris, _y, _sign) in &creature.eye_parts {
             let sp = &doll.particles[sclera];
+            let cp = &doll.particles[creature.skull];
+            // Is the inside of the eye actually there? Same test the sphere
+            // uses: does it face the viewer?
+            let eh = walker.facing.get(sclera).copied().unwrap_or(heading);
+            let (dx, dl, du) = (
+                sp.pos.x - cp.pos.x,
+                sp.side - cp.side,
+                cp.pos.y - sp.pos.y,
+            );
+            let n_y = dx * eh.cos() - dl * eh.sin();
+            let inner_visible = (-pitch_c * n_y + pitch_s * du) > 0.0;
+
             let (cx, cy) = (screen[sclera].x, screen[sclera].y);
             let re = sp.radius.max(1.0);
             let ix = cx.round() as i32;
@@ -1129,6 +1141,11 @@ fn main() -> Result<(), String> {
                 let (ux, uy) = (fx - cx, fy - cy);
                 if ux * ux + uy * uy > re * re {
                     return false;
+                }
+                if !inner_visible {
+                    // Nothing behind the shell to see, so the open half closes:
+                    // a shut eye rather than a hole in the head.
+                    return true;
                 }
                 // Screen y grows downwards; the lid covers above the line.
                 uy < -(line + ux * tilt.tan())

@@ -132,10 +132,11 @@ vanishing at the wrong angle:
 
 The eye is built the way the original builds it: three nested shells, outside in.
 
-1. **Eyelid** - a line across the eye dividing coat colour from open eye. Drawn
-   last, so it covers the sphere and the pupil. This is what lets the eye read
-   as an eye when the pupil has slid out of sight, and what will carry
-   expressions.
+1. **Eyelid** - a ring, a line across the eye dividing coat colour from open
+   eye, and the rule that ties them together: **when the inner shells are not
+   visible the open half fills with fur**, so the eye closes instead of leaving
+   a hole in the head. Drawn last, never culled. This is what lets the eye read
+   as an eye from every angle.
 2. **Sclera** - a white sphere drawn as a *full circle*, clipped only by the
    head. It never rotates, so it never pops.
 3. **Pupil and iris** - one texture, sliding inside the sphere at
