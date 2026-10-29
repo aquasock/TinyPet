@@ -9,26 +9,32 @@ claim is tagged:
 Keep that distinction. The whole project rests on not believing things we have
 not checked.
 
-## The shipped executable is the demo build
+## Two builds: the disc exe is 4.00.01, the 4.2 patch is applied separately
 
-**[verified]** `Petz 4.exe` reports `FileVersion 4.00.01` / `ProductVersion
-4.00.01` in its RT_VERSION resource, and its internal version string is
-`PFM_[V4.015]`. Both discs ship the **identical** binary
-(`6f11d4ffd630694096fe...`), and no other build exists on the media.
+**[verified]** `Petz 4.exe` on both discs reports `FileVersion 4.00.01`
+(internal string `PFM_[V4.015]`), and the two discs ship the **identical**
+binary (`6f11d4ffd630694096fe...`).
 
-Petz 4 shipped as a demo. The full game was unlocked by an official **Patch 4.2**
-(2002), which simply replaces `Petz 4.exe`. That is why:
+**[verified]** The official 2002 Patch 4.2 ships a different `Petz 4.exe`
+(4,243,456 bytes vs 5,582,096; `FileVersion 4.2`). It is applied to a separate
+tree, `build/install-4.2`, so the disc build stays intact. Same API surface -
+5,719 exports - but every RVA moves (`XFillRotatedCircle` 0x3ad50 -> 0x5cc10).
 
-- the game runs with adoption kits greyed out and a "How to Order" entry
-- there are no serial numbers for Catz 4 / Dogz 4 (the community FAQ is right)
-- `XSecure::ValidRetailSerialNumber` exists anyway - it is shared code from
-  earlier products, still called at startup, but a 12-digit serial is not how
-  Petz 4 was unlocked
+**[retracted]** An earlier version of this section claimed the shipped exe was a
+demo build and that missing toys were demo gating. **That was wrong.** The game
+has no such limitation: toys live in the Toy Closet, are carried in the toolbox,
+and are then usable in other rooms. Greyed-out adoption kits and a "How to Order"
+menu are ordinary retail UI, not demo markers. The mistake came from inferring
+behaviour from menu state instead of playing the game.
 
-**Consequence for this repo:** every address, capture and measurement in this
-document comes from the 4.00.01 demo executable. The 4.2 build will shift RVAs.
-The shim verifies prologue bytes before patching, so it fails safe on a
-different build rather than corrupting one - but the hooks must be re-targeted.
+What the patch installer does write is
+`HKLM\...\App Paths\Petz 4.exe`, pointing at the install folder - the entry the
+original setup creates and that extracting the discs never produced.
+
+**Consequence for this repo:** addresses and captures before this point came from
+4.00.01. The shim now resolves its targets through the export table by mangled
+name, so hooks install on either build, and it still verifies prologue bytes
+before patching.
 
 ## Provenance
 
