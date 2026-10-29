@@ -9,5 +9,5 @@ pub mod spans;
 pub mod surface;
 
 pub use lnz::Lnz;
-pub use spans::{fill_disc, row_span, SpanTable};
+pub use spans::{fill_disc, fill_ring, row_span, SpanTable};
 pub use surface::{Palette, Surface};

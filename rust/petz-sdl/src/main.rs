@@ -31,6 +31,8 @@ struct Ball {
     cy: i32,
     w: usize,
     colour: u8,
+    /// 0 rotated, 1 normal, 2 emboss, 3 outline, 4 circleEx
+    kind: u8,
 }
 
 fn load_animation(path: &PathBuf) -> Animation {
@@ -55,8 +57,9 @@ fn load_animation(path: &PathBuf) -> Animation {
             let cy = i16::from_le_bytes(b[p + 2..p + 4].try_into().unwrap()) as i32;
             let w = u16::from_le_bytes(b[p + 4..p + 6].try_into().unwrap()) as usize;
             let colour = b[p + 8];
+            let kind = b[p + 9];
             p += 12;
-            balls.push(Ball { cx, cy, w, colour });
+            balls.push(Ball { cx, cy, w, colour, kind });
         }
         frames.push(balls);
     }
@@ -84,8 +87,37 @@ fn main() -> Result<(), String> {
         return Err("build/animation.petz missing - run tools/export-frames.py".into());
     }
     let anim = load_animation(&anim_path);
-    let w = anim.width;
-    let h = anim.height;
+    // Follow-camera: the clip covers the pet's whole travel range, so at any one
+    // frame it occupies a small corner. Centre each frame on its own bounds and
+    // size the canvas to the largest frame, which lets the window scale up.
+    let mut frames = anim.frames;
+    let (mut maxw, mut maxh) = (1usize, 1usize);
+    for f in &frames {
+        if f.is_empty() { continue; }
+        let (mut x0, mut y0, mut x1, mut y1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+        for b in f {
+            x0 = x0.min(b.cx - b.w as i32 / 2);
+            y0 = y0.min(b.cy - b.w as i32 / 2);
+            x1 = x1.max(b.cx + b.w as i32 / 2);
+            y1 = y1.max(b.cy + b.w as i32 / 2);
+        }
+        maxw = maxw.max((x1 - x0) as usize);
+        maxh = maxh.max((y1 - y0) as usize);
+    }
+    let (w, h) = (maxw + 32, maxh + 32);
+    for f in &mut frames {
+        if f.is_empty() { continue; }
+        let (mut x0, mut y0, mut x1, mut y1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+        for b in f.iter() {
+            x0 = x0.min(b.cx - b.w as i32 / 2);
+            y0 = y0.min(b.cy - b.w as i32 / 2);
+            x1 = x1.max(b.cx + b.w as i32 / 2);
+            y1 = y1.max(b.cy + b.w as i32 / 2);
+        }
+        let (dx, dy) = ((w as i32 - (x1 - x0)) / 2 - x0, (h as i32 - (y1 - y0)) / 2 - y0);
+        for b in f.iter_mut() { b.cx += dx; b.cy += dy; }
+    }
+    let anim = Animation { width: w, height: h, frames };
     let table = load_table();
     let palette = load_palette();
     println!("loaded {} frames", anim.frames.len());
@@ -143,7 +175,12 @@ fn main() -> Result<(), String> {
             if ball.w == 0 || ball.w > table.max_diameter() {
                 continue;
             }
-            fill_disc(&mut surface, &table, ball.cx, ball.cy, ball.w, ball.colour);
+            if ball.kind == 3 {
+                // Outline is a ring at the body's rect, not a disc.
+                petz_core::fill_ring(&mut surface, &table, ball.cx, ball.cy, ball.w, 1, ball.colour);
+            } else {
+                fill_disc(&mut surface, &table, ball.cx, ball.cy, ball.w, ball.colour);
+            }
         }
         let painted = surface.pixels().iter().filter(|&&p| p != 12).count();
         if frame_idx % 30 == 0 { eprintln!("painted {painted} px on frame {frame_idx}"); }

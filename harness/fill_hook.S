@@ -25,10 +25,11 @@ _fill_entry:
     /* after pushad(32) + pushfd(4): ret at +36, arg1 at +40, saved ecx at +28 */
     mov     eax, dword ptr [esp+40]
     mov     edx, dword ptr [esp+28]
+    push    0
     push    eax
     push    edx
     call    _fill_probe
-    add     esp, 8
+    add     esp, 12
     popfd
     popad
     jmp     dword ptr [_fill_trampoline]
@@ -203,10 +204,11 @@ _fill2_entry:
     pushfd
     mov     eax, dword ptr [esp+40]
     mov     edx, dword ptr [esp+28]
+    push    1
     push    eax
     push    edx
     call    _fill_probe
-    add     esp, 8
+    add     esp, 12
     popfd
     popad
     jmp     dword ptr [_g_fill2_tramp]
@@ -217,10 +219,11 @@ _fill3_entry:
     pushfd
     mov     eax, dword ptr [esp+40]
     mov     edx, dword ptr [esp+28]
+    push    2
     push    eax
     push    edx
     call    _fill_probe
-    add     esp, 8
+    add     esp, 12
     popfd
     popad
     jmp     dword ptr [_g_fill3_tramp]
@@ -231,10 +234,11 @@ _fill4_entry:
     pushfd
     mov     eax, dword ptr [esp+40]
     mov     edx, dword ptr [esp+28]
+    push    3
     push    eax
     push    edx
     call    _fill_probe
-    add     esp, 8
+    add     esp, 12
     popfd
     popad
     jmp     dword ptr [_g_fill4_tramp]
@@ -245,10 +249,11 @@ _fill5_entry:
     pushfd
     mov     eax, dword ptr [esp+40]
     mov     edx, dword ptr [esp+28]
+    push    4
     push    eax
     push    edx
     call    _fill_probe
-    add     esp, 8
+    add     esp, 12
     popfd
     popad
     jmp     dword ptr [_g_fill5_tramp]

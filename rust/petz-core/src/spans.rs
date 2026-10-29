@@ -71,3 +71,36 @@ pub fn fill_disc(
         surface.fill_span(y as usize, left, len, colour);
     }
 }
+
+/// Draw a ring of `thickness` pixels inside the silhouette of a disc.
+///
+/// `XFillOutlineCircle` receives the same render block as the body fill - same
+/// rect, same centre - so the outline cannot be a disc drawn first or last; it
+/// must be the rim. Drawing outer spans and skipping the interior reproduces
+/// that.
+pub fn fill_ring(
+    surface: &mut crate::surface::Surface,
+    table: &SpanTable,
+    cx: i32,
+    cy: i32,
+    diameter: usize,
+    thickness: usize,
+    colour: u8,
+) {
+    let rows = table.rows(diameter);
+    let t = thickness.max(1);
+    for (row, &width) in rows.iter().enumerate() {
+        if width == 0 { continue; }
+        let (y, left, len) = row_span(cx, cy, diameter, row, width);
+        if y < 0 { continue; }
+        let w = len as i32;
+        // Top and bottom rows are solid across the span.
+        let solid = row < t || row + t >= rows.len() || (w as usize) <= 2 * t;
+        if solid {
+            surface.fill_span(y as usize, left, len, colour);
+        } else {
+            surface.fill_span(y as usize, left, t, colour);
+            surface.fill_span(y as usize, left + w - t as i32, t, colour);
+        }
+    }
+}

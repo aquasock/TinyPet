@@ -185,8 +185,13 @@ fn main() {
                     let cy = i16::from_le_bytes(bytes[o+2..o+4].try_into().unwrap()) as i32;
                     let dw = u16::from_le_bytes(bytes[o+4..o+6].try_into().unwrap()) as usize;
                     let colour = bytes[o+8];
+                    let kind = bytes[o+9];
                     if dw == 0 || dw > table.max_diameter() { continue; }
-                    fill_disc(&mut surface, &table, cx, cy, dw, colour);
+                    if kind == 3 {
+                        petz_core::fill_ring(&mut surface, &table, cx, cy, dw, 1, colour);
+                    } else {
+                        fill_disc(&mut surface, &table, cx, cy, dw, colour);
+                    }
                 }
                 let rgb = palette.to_rgb(&surface);
                 let out = repo_root().join(format!("build/frame-{want}.ppm"));

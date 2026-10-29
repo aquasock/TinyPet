@@ -1,105 +1,134 @@
 #!/usr/bin/env python3
-"""Convert the shim's render-block ring into a frame-oriented animation file.
+"""Export one pet's animation from the shim's render-block ring.
 
-The ring (`blocks.bin`) is a flat stream of 72-byte records:
+Record layout (72 bytes, written by harness/proxy.c):
 
-    bytes  0..63  CircleRenderBlock as seen at fill time
-    bytes 64..67  drawport pointer, or the marker 'MARF' for a frame boundary
-    bytes 68..71  sequence counter
+    0..63   CircleRenderBlock as seen at fill time
+    64..67  'MARF' for a frame marker, else the drawport pointer
+    68..71  sprite pointer (markers only)
 
-Within the block, as decoded from the capture:
+Fields decoded from CircleRenderBlock:
 
-    +4   int16  palette index (colour)
-    +32  int16  rect left      +36  rect top
-    +40  int16  rect right     +44  rect bottom
-    +52  int16  angle-ish      +56  int16  small parameter
+    +4   int16  palette index        +32/+36  rect top-left
+    +6   u8     fill-pass kind       +40/+44  rect bottom-right
+                (0 rotated, 1 normal, 2 emboss, 3 outline, 4 circleEx)
+    +52  int16  angle-ish            +56  int16  small parameter
 
-Every ball is drawn twice (body and emboss), so consecutive records pair up.
+Passes: each ball is drawn by normal/rotated (body), emboss (a smaller offset
+disc), and outline (a ring at the same rect). XFillCircleEx calls the others
+internally, so its records duplicate them - harmless to replay.
 
-Usage: export-frames.py [blocks.bin] [out.json]
+Output `animation.petz`:
+
+    'PZAN' u32 version u32 width u32 height u32 frame_count
+    per frame: u32 ball_count, then per ball:
+        i16 cx, i16 cy, u16 w, u16 h, u8 colour, u8 kind, u16 pad
+
+Usage: export-frames.py [blocks.bin] [out.petz]
 """
 import json
+import math
 import struct
 import sys
+import collections
 
 SRC = sys.argv[1] if len(sys.argv) > 1 else "build/install/blocks.bin"
-OUT = sys.argv[2] if len(sys.argv) > 2 else "build/animation.json"
+OUT = sys.argv[2] if len(sys.argv) > 2 else "build/animation.petz"
 
 raw = open(SRC, "rb").read()
 n = len(raw) // 72
 
-
-def field(i, off):
+def s16(i, off):
     return struct.unpack_from("<h", raw, i * 72 + off)[0]
 
+def kind_of(i):
+    return raw[i * 72 + 6]
 
 def is_marker(i):
     return raw[i * 72 + 64:i * 72 + 68] == b"MARF"
 
+def sprite_of(i):
+    return struct.unpack_from("<I", raw, i * 72 + 68)[0]
 
-frames = []
-current = []
+# Split the stream into frames, tagged by which sprite drew them.
+segments = []
+cur = []
+sprite = 0
 for i in range(n):
     if is_marker(i):
-        if current:
-            frames.append(current)
-        current = []
-        continue
-    current.append({
-        "x0": field(i, 32), "y0": field(i, 36),
-        "x1": field(i, 40), "y1": field(i, 44),
-        "colour": field(i, 4),
-        "angle": field(i, 52),
-        "param": field(i, 56),
-    })
-if current:
-    frames.append(current)
+        if cur:
+            segments.append((sprite, cur))
+        cur = []
+        sprite = sprite_of(i)
+    else:
+        cur.append(i)
+if cur:
+    segments.append((sprite, cur))
 
-# Drop the duplicate pass: keep the first of each identical consecutive pair.
-def dedupe(fills):
+by_sprite = collections.defaultdict(list)
+for s, cells in segments:
+    by_sprite[s].append(cells)
+
+def centroid(cells):
+    xs = [(s16(i, 32) + s16(i, 40)) // 2 for i in cells]
+    ys = [(s16(i, 36) + s16(i, 44)) // 2 for i in cells]
+    return (sum(xs) / len(xs), sum(ys) / len(ys)) if xs else None
+
+def motion(segs):
+    cs = [c for c in (centroid(s) for s in segs) if c]
+    steps = sorted(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(cs, cs[1:]))
+    return steps[len(steps) // 2] if steps else 0.0
+
+# The pet the player interacted with is the one that moves - but only consider
+# sprites with enough frames for that estimate to mean anything. A 5-frame
+# sprite can look "fast" from a single jump.
+candidates = [(sp, sg) for sp, sg in by_sprite.items() if len(sg) >= 30] or list(by_sprite.items())
+sprite, segs = max(candidates, key=lambda kv: motion(kv[1]))
+
+frames = []
+for cells in segs:
     out = []
-    for f in fills:
-        if out and (f["x0"], f["y0"], f["x1"], f["y1"], f["colour"]) == (
-                out[-1]["x0"], out[-1]["y0"], out[-1]["x1"], out[-1]["y1"], out[-1]["colour"]):
+    seen = set()
+    for i in cells:
+        key = (s16(i, 32), s16(i, 36), s16(i, 40), s16(i, 44), s16(i, 4), kind_of(i))
+        if key in seen:          # exact duplicate draws (circleEx repeats them)
             continue
-        out.append(f)
-    return out
+        seen.add(key)
+        x0, y0, x1, y1 = key[0], key[1], key[2], key[3]
+        out.append({
+            "cx": (x0 + x1) // 2, "cy": (y0 + y1) // 2,
+            "w": x1 - x0, "h": y1 - y0,
+            "colour": key[4], "kind": key[5],
+        })
+    frames.append(out)
 
-balls_per_frame = []
+# Crop to the pet's own bounds across the whole clip: the game canvas is mostly
+# empty and the pet would be a speck in it.
+allb = [b for f in frames for b in f]
+minx = min(b["cx"] - b["w"] // 2 for b in allb) if allb else 0
+miny = min(b["cy"] - b["h"] // 2 for b in allb) if allb else 0
+maxx = max(b["cx"] + b["w"] // 2 for b in allb) if allb else 640
+maxy = max(b["cy"] + b["h"] // 2 for b in allb) if allb else 480
+pad = 24
 for f in frames:
-    balls = dedupe(f)
-    balls_per_frame.append([{
-        "cx": (b["x0"] + b["x1"]) // 2,
-        "cy": (b["y0"] + b["y1"]) // 2,
-        "w": b["x1"] - b["x0"],
-        "h": b["y1"] - b["y0"],
-        "colour": b["colour"],
-    } for b in balls])
+    for b in f:
+        b["cx"] -= minx - pad
+        b["cy"] -= miny - pad
+W = (maxx - minx + 2 * pad + 15) // 16 * 16
+H = (maxy - miny + 2 * pad + 15) // 16 * 16
 
-sizes = [len(b) for b in balls_per_frame if b]
-doc = {
-    "source": SRC,
-    "frames": balls_per_frame,
-    "stats": {
-        "records": n,
-        "frames": len(balls_per_frame),
-        "balls_per_frame_min": min(sizes) if sizes else 0,
-        "balls_per_frame_max": max(sizes) if sizes else 0,
-        "balls_per_frame_mean": round(sum(sizes) / len(sizes), 1) if sizes else 0,
-    },
-}
-with open(OUT, "w") as fh:
-    json.dump(doc, fh)
-print(json.dumps(doc["stats"], indent=2))
-print(f"wrote {OUT}")
-
-# Compact binary for the Rust side (no JSON dependency there).
-BIN = OUT.rsplit(".", 1)[0] + ".petz"
-with open(BIN, "wb") as fh:
+with open(OUT, "wb") as fh:
     fh.write(b"PZAN")
-    fh.write(struct.pack("<II", 1, len(balls_per_frame)))
-    for balls in balls_per_frame:
+    fh.write(struct.pack("<IIII", 1, W, H, len(frames)))
+    for balls in frames:
         fh.write(struct.pack("<I", len(balls)))
         for b in balls:
-            fh.write(struct.pack("<hhHHB3x", b["cx"], b["cy"], b["w"], b["h"], b["colour"]))
-print(f"wrote {BIN} ({BIN and __import__('os').path.getsize(BIN)} bytes)")
+            fh.write(struct.pack("<hhHHBBH", b["cx"], b["cy"], b["w"], b["h"],
+                                 b["colour"], b["kind"], 0))
+
+kinds = collections.Counter(b["kind"] for f in frames for b in f)
+print(f"sprite 0x{sprite:08x}: {len(frames)} frames, canvas {W}x{H}")
+print(f"balls/frame: {min(len(f) for f in frames)}..{max(len(f) for f in frames)}")
+print(f"pass mix: {dict(sorted(kinds.items()))}  (0 rot,1 normal,2 emboss,3 outline,4 circleEx)")
+json.dump({"width": W, "height": H, "frames": frames}, open(OUT.rsplit('.', 1)[0] + ".json", "w"))
+print(f"wrote {OUT}")

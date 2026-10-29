@@ -901,7 +901,7 @@ static void dump_tables(void)
     slog(buf);
 }
 
-void fill_probe(void *drawport, void *block)
+void fill_probe(void *drawport, void *block, int kind)
 {
     LONG n = InterlockedIncrement(&g_fill_calls);
     /* Recording every fill's render block is opt-in: doing file I/O on the
@@ -912,6 +912,7 @@ void fill_probe(void *drawport, void *block)
         if (slot < RING_RECS) {
             unsigned char *rec = g_ring + (size_t)slot * RING_REC;
             memcpy(rec, block, 64);
+            rec[6] = (unsigned char)kind;      /* which fill pass drew this */
             DWORD dp = (DWORD)(ULONG_PTR)drawport;
             memcpy(rec + 64, &dp, 4);
             DWORD frame = (DWORD)n;
