@@ -693,6 +693,8 @@ fn main() -> Result<(), String> {
     let mut frame_no = 0u32;
     let mut held: std::collections::HashSet<Keycode> = std::collections::HashSet::new();
     let mut depth = DepthBuffer::new(W, H);
+    // Ball numbers, for referring to them. Tab toggles.
+    let mut show_ids = true;
     let mut events = sdl.event_pump()?;
     let mut paused = false;
     let step = 1.0 / 120.0;
@@ -786,6 +788,10 @@ fn main() -> Result<(), String> {
                     sdl2::keyboard::Keycode::T => {
                         tex_idx = (tex_idx + 1) % textures.len();
                         report(light, steps, tex_idx, textures[tex_idx].0);
+                    }
+                    sdl2::keyboard::Keycode::Tab => {
+                        show_ids = !show_ids;
+                        println!("ball numbers {}", if show_ids { "on" } else { "off" });
                     }
                     sdl2::keyboard::Keycode::P => {
                         report(light, steps, tex_idx, textures[tex_idx].0);
@@ -1186,6 +1192,18 @@ fn main() -> Result<(), String> {
         // to the right, 180 is towards the viewer, 270 to the left.
         let facing = walker.heading_body.to_degrees().rem_euclid(360.0).round() as i32;
         draw_number(&mut canvas, 18, 18, 4, facing);
+
+        // A number on every ball, just above it, so one can be named exactly.
+        if show_ids {
+            for (i, p) in screen.iter().enumerate() {
+                let x = (p.x * scale as f32) as i32;
+                let y = (p.y * scale as f32) as i32 - doll.particles[i].radius as i32 * 2 - 12;
+                if x < -20 || y < -20 || x > (W * scale) as i32 || y > (H * scale) as i32 {
+                    continue;
+                }
+                draw_number(&mut canvas, x, y, 2, i as i32);
+            }
+        }
 
         canvas.present();
     }
