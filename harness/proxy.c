@@ -456,6 +456,70 @@ static HPALETTE WINAPI hook_CreatePalette(const LOGPALETTE *lp)
 extern void tex_entry(void);
 extern void serial_entry(void);
 extern void goal_entry(void);
+extern void frame_entry(void);
+extern void disp_entry(void);
+void *g_disp_tramp = NULL;
+static int g_disp_dumps = 0;
+
+void disp_probe(void *ballstates)
+{
+    if (!ballstates || g_disp_dumps >= 3) return;
+    char name[48], *q = name;
+    lstrcpyA(q, "ballstate-"); q += lstrlenA(q);
+    q = put_uint(q, (unsigned long)g_disp_dumps);
+    lstrcpyA(q, ".raw"); q += lstrlenA(q);
+    *q = 0;
+    HANDLE f = CreateFileA(name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) return;
+    DWORD n;
+    WriteFile(f, ballstates, 2048, &n, NULL);
+    CloseHandle(f);
+    g_disp_dumps++;
+    char buf[80], *p = buf;
+    lstrcpyA(p, "ballstates dumped -> "); p += lstrlenA(p);
+    lstrcpynA(p, name, 30);
+    slog(buf);
+}
+extern void frame_post_entry(void);
+void *g_frame_tramp = NULL, *g_frame_ret = NULL;
+void *g_frame_post = (void *)frame_post_entry;
+static volatile LONG g_frame_calls = 0;
+static int g_frame_dumps = 0;
+
+void frame_probe(void *self, long idx)
+{
+    static volatile LONG n = 0;
+    if (InterlockedIncrement(&n) > 4) return;
+    char buf[96], *p = buf;
+    lstrcpyA(p, "ballframe idx="); p += lstrlenA(p);
+    p = put_uint(p, (unsigned long)(idx < 0 ? 0 : idx));
+    lstrcpyA(p, " self="); p += lstrlenA(p);
+    p = put_hex64(p, (unsigned long long)(ULONG_PTR)self);
+    *p = 0; slog(buf);
+}
+
+void frame_post_probe(unsigned ret)
+{
+    if (!ret || g_frame_dumps >= 4) return;
+    char name[48], *q = name;
+    lstrcpyA(q, "ballframe-"); q += lstrlenA(q);
+    q = put_uint(q, (unsigned long)g_frame_dumps);
+    lstrcpyA(q, ".raw"); q += lstrlenA(q);
+    *q = 0;
+    HANDLE f = CreateFileA(name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) return;
+    DWORD n;
+    /* 512 bytes is enough to see the first fields; enough to match against BDT. */
+    WriteFile(f, (const void *)(ULONG_PTR)ret, 512, &n, NULL);
+    CloseHandle(f);
+    g_frame_dumps++;
+    char buf[80], *p = buf;
+    lstrcpyA(p, "ballframe dumped -> "); p += lstrlenA(p);
+    lstrcpynA(p, name, 30);
+    slog(buf);
+}
 extern void plan_entry(void);
 extern void state_entry(void);
 void *g_goal_tramp = NULL, *g_plan_tramp = NULL, *g_state_tramp = NULL;
@@ -986,6 +1050,24 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
                     { "?DispatchState@SBehaviorRegistry@@SAXAAVCharacterSprite@@_N1H@Z",
                       (void *)state_entry, &g_state_tramp, {0x8b,0x44,0x24,0x10} },
                 };
+                {
+                    void *fn = find_export("?GetRawFramePtr@XBallzData@@QAEPAUBallFrame@@J@Z");
+                    if (fn) {
+                        static const BYTE pre[5] = {0x55,0x8B,0xEC,0x6A,0xFF};
+                        DWORD rva = (DWORD)fn - (DWORD)GetModuleHandleA(NULL);
+                        g_frame_tramp = install_inline_ex(rva, (void *)frame_entry, pre, 5, 5);
+                        slog(g_frame_tramp ? "frame hook: installed" : "frame hook: prologue mismatch");
+                    } else slog("frame hook: export not found");
+                }
+                {
+                    void *fn = find_export("?DisplayBallzFrame@XBallz@@QAEXPAVXDrawPort@@PBU?$XTRect@HJ@@PAVBallState@@@Z");
+                    if (fn) {
+                        static const BYTE pre[2] = {0x6A,0xFF};
+                        DWORD rva = (DWORD)fn - (DWORD)GetModuleHandleA(NULL);
+                        g_disp_tramp = install_inline_ex(rva, (void *)disp_entry, pre, 2, 7);
+                        slog(g_disp_tramp ? "ballstate hook: installed" : "ballstate hook: prologue mismatch");
+                    } else slog("ballstate hook: export not found");
+                }
                 g_goal_name_fn = (pNameFn)find_export("?GetGoalStringName@SBehaviorRegistry@@SAPBDH@Z");
                 g_plan_name_fn = (pNameFn)find_export("?GetPlanStringName@SBehaviorRegistry@@SAPBDH@Z");
                 for (int i = 0; i < 3; i++) {

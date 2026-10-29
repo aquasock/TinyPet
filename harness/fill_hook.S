@@ -144,3 +144,53 @@ _state_entry:
     popfd
     popad
     jmp     dword ptr [_g_state_tramp]
+
+/* XBallzData::GetRawFramePtr(long) -> BallFrame*. Prologue: 55 / 8B EC / 6A FF (5 bytes).
+ * Entry logs the frame index; the return stub dumps the BallFrame so the
+ * in-memory layout can be matched against the BDT bytes. */
+    .globl _frame_entry
+_frame_entry:
+    pushad
+    pushfd
+    mov     eax, dword ptr [esp+40]      /* arg1: frame index */
+    mov     edx, dword ptr [esp+28]      /* this */
+    push    eax
+    push    edx
+    call    _frame_probe
+    add     esp, 8
+
+    mov     eax, dword ptr [esp+36]
+    mov     dword ptr [_g_frame_ret], eax
+    mov     eax, dword ptr [_g_frame_post]
+    mov     dword ptr [esp+36], eax
+
+    popfd
+    popad
+    jmp     dword ptr [_g_frame_tramp]
+
+    .globl _frame_post_entry
+_frame_post_entry:
+    pushad
+    pushfd
+    mov     eax, dword ptr [esp+32]
+    push    eax
+    call    _frame_post_probe
+    add     esp, 4
+    popfd
+    popad
+    jmp     dword ptr [_g_frame_ret]
+
+/* XBallz::DisplayBallzFrame(XDrawPort*, XTRect*, BallState*)
+ * Prologue: 6A FF (push -1) / 68 imm32 (push handler) = 7 whole bytes.
+ * arg3 is the frame's BallState array - the animation data the port needs. */
+    .globl _disp_entry
+_disp_entry:
+    pushad
+    pushfd
+    mov     eax, dword ptr [esp+48]      /* arg3: BallState* */
+    push    eax
+    call    _disp_probe
+    add     esp, 4
+    popfd
+    popad
+    jmp     dword ptr [_g_disp_tramp]
