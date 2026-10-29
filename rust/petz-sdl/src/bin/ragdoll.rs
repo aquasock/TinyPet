@@ -459,7 +459,7 @@ impl Walker {
             ear_angle: -14.0_f32.to_radians(),
             ear_radius: 33.0,
             ear_sink: 0.35,
-            ear_bias: -6.0,
+            ear_bias: 0.0,
             moving: 1.0,
         }
     }
