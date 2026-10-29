@@ -29,8 +29,8 @@ cargo run --release -p petz-sdl --bin ragdoll
 
 Keys: drag to grab, **`W`/`S` forward and back**, **`A`/`D` turn left and right**
 (hold, not toggle), `+/-` speed, `V` view pitch, arrows move the light, `Z`/`X`
-ambience, `[ ]` ramp steps, `T` texture, `,`/`.` spine flex, `H`/`J` eye forward,
-`K`/`L` eye outboard, `P` print settings, `R` reset, `Space` pause, `Esc` quit.
+ambience, `[ ]` ramp steps, `T` texture, `,`/`.` spine flex, `H`/`J` eye radius,
+`K`/`L` eye angle, `P` print settings, `R` reset, `Space` pause, `Esc` quit.
 
 The big number in the top left is the facing: **0** away from the viewer, **90**
 right, **180** towards the viewer, **270** left. It shows the *actual* facing,
@@ -79,7 +79,8 @@ is asserted as a regression test.
 - **Grab**: nothing ends up stranded more than a body length from the spine
   after a drag and release.
 - **Eyes**: one visible in profile, two facing the camera, none facing away;
-  each eye draws a complete iris ring (88 px).
+  the arc where both are up is at least 60 degrees, centred on the front; and the
+  radius cannot flip an eye (see below).
 - **Turn**: rotation is rate-limited and reaches the head before the tail.
 
 ## Known wrong, or unknown
@@ -95,14 +96,41 @@ is asserted as a regression test.
 - **Eyelids are removed.** Petz has no lid geometry — it parameterises one with
   `[Eyelid Color]` plus per-eye "eyelid height" and "eyelid tilt". Our lid-ball
   approximation was visible above the eye and read as a small ear.
-- **The two-eye arc is narrow** (37°). The head is a cluster of overlapping
-  balls rather than a solid, so the far eye is occluded near the silhouette
-  before any visibility test would hide it.
+- **Eyes still clip at some angles.** The head is a single oversized ball, and
+  the occlusion test compares the eye against that one sphere only. Real eyes
+  sit in a socket formed by several balls.
 - **Physics is sagittal-only.** The solver runs in the animal's own plane;
   lateral offsets are authored, not simulated. A turning dog's tail swings
   fore-and-aft, not across the screen.
 - **Feet slide during a turn.** They are driven to body-space targets rather
   than stepping to new plants.
+
+## The eye, and why it was hard
+
+Five separate faults, each of which looked like the same symptom - an eye
+vanishing at the wrong angle:
+
+1. **The eye was compared against the head by centre depth.** A head ball of
+   radius 26 has its centre a full radius behind its own surface, so the head's
+   centre crossed in front of the eye long before the eye was actually behind
+   the head.
+2. **Sorting the eye in front fixed that, then made it pop** - one binary cut
+   instead of a shrinking crescent.
+3. **The eyes were geometrically inside the head.** They sat 14 from a skull
+   centre of radius 26; under correct occlusion they were simply buried.
+4. **Each part of the eye clipped on its own.** The outline was drawn in the
+   global rim pass, where nothing masked it, so the brown ring blew out while
+   the blue ring stayed.
+5. **The lateral placement was wrong.** Two parallel lines pushed sideways
+   eventually pass through the head. Placing the eye *by angle round the skull*
+   keeps it tangent to the surface, and makes the facing test
+   `radius * cos(angle +/- heading)` - radius-independent, so width can no
+   longer flip an eye on or off.
+
+The eye is now one unit drawn in order - outline, sclera, iris ring, pupil -
+every layer through the same per-pixel clip, so all four go behind the head
+together. Placement is angle (27 degrees) and radius (31) on a head of 26, both
+live-tunable.
 
 ## Reference findings worth keeping
 
