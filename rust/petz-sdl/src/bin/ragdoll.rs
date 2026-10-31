@@ -99,6 +99,20 @@ const EAR_TIP_SINK: f32 = 0.20;
 /// is 1.0; the tail is deliberately looser so the chain can stretch and whip.
 const TAIL_LINK: f32 = 0.12;
 
+/// The idle sway on the tail's root: how far it travels fore-and-aft and up and
+/// down, in body units, and how fast it breathes, in radians per second.
+///
+/// Small on purpose. The root is held weakly (`follow = 0.25`), so it drags the
+/// free chain behind it at a distance: six units here is a good many more at the
+/// tip, and a root that swings visibly by itself reads as a wagging stick.
+const TAIL_SWAY_X: f32 = 6.0;
+const TAIL_SWAY_Y: f32 = 4.0;
+const TAIL_SWAY_RATE: f32 = 0.9;
+
+/// One extra swing per stride, in the same units as `TAIL_SWAY_X`, so the tail
+/// answers the legs instead of only the clock.
+const TAIL_GAIT_X: f32 = 5.0;
+
 /// The claw ball's radius. Small enough that four of them across a foot's toe
 /// are separate dots at 320x240 rather than one blob.
 const CLAW_RADIUS: f32 = 2.0;
@@ -537,6 +551,18 @@ struct Walker {
     eye_lift: f32,
     /// Last movement input, so the pose knows whether to animate a gait.
     moving: f32,
+    /// Simulated seconds. Only the tail's idle sway reads it, and it advances
+    /// with the fixed physics step rather than the frame clock: a frame is
+    /// however many steps the accumulator owed, so the frame clock would make
+    /// the sway depend on how fast the machine is.
+    clock: f32,
+    /// How much of that sway to apply, live, 0 to 3. One is the tuned default;
+    /// a test that wants to measure the chain's own liveliness sets it to 0, so
+    /// it measures damping rather than the driver.
+    sway: f32,
+    /// How fast the sway breathes, in radians per second. Live, because the
+    /// difference between a tail and a metronome is entirely this number.
+    sway_rate: f32,
 }
 
 /// Fastest the animal's body can turn, in radians per second.
@@ -607,6 +633,9 @@ impl Walker {
             lid_tilt: 0.23,
             eye_lift: 12.0,
             moving: 1.0,
+            clock: 0.0,
+            sway: 1.0,
+            sway_rate: TAIL_SWAY_RATE,
         }
     }
 
@@ -632,6 +661,10 @@ impl Walker {
     /// `moving` is +1 forward, -1 backward, 0 standing. `turning` is -1 left,
     /// +1 right, 0 straight.
     fn advance(&mut self, dt: f32, moving: f32, turning: f32) {
+        // The sway clock runs whether or not the animal moves: a standing cat's
+        // tail is never still, and that slow drift is most of what says the
+        // body is alive rather than parked.
+        self.clock += dt;
         // Turning happens whether or not the animal is moving - a dog can look
         // round while standing.
         self.body.heading += turning * TURN_BUTTON_RATE * dt;
@@ -767,7 +800,27 @@ impl Walker {
         // looks like a broken tail; what it needs is motion, not a shape.
         const ROOT_LIFT: f32 = 13.0;
         if let Some(&root) = creature.tail.first() {
-            let home = Vec2::new(252.0, GROUND - 68.0 - ROOT_LIFT + lift);
+            // The root is held, not nailed down: it traces a slow oval behind
+            // the rump and carries the chain with it. Left at a fixed point the
+            // tail is correct and dead - every ball past the root is a free
+            // link with nothing to push it, so it just hangs.
+            //
+            // Two rates, the second twice the first and out of phase, so the
+            // path is an oval rather than a line traced back and forth.
+            let t = self.clock;
+            let sway_x = (t * self.sway_rate).sin();
+            let sway_y = (t * self.sway_rate * 2.0 + 0.6).sin();
+            // Walking adds one swing per stride, in phase with the legs, on top
+            // of the idle drift.
+            let stride = if walking {
+                (self.gait.phase * std::f32::consts::TAU).sin()
+            } else {
+                0.0
+            };
+            let home = Vec2::new(
+                252.0 - self.sway * (TAIL_SWAY_X * sway_x + TAIL_GAIT_X * stride),
+                GROUND - 68.0 - ROOT_LIFT + lift - self.sway * TAIL_SWAY_Y * sway_y,
+            );
             doll.drive_to(root, home, 0.25);
         }
 
@@ -895,6 +948,17 @@ fn report_ears() {
     );
     println!(
         "ear tips:  back {EAR_TIP_BACK:.1}  up {EAR_TIP_UP:.1}  size {EAR_TIP_SIZE:.1}  sink {EAR_TIP_SINK:.2}"
+    );
+}
+
+fn report_tail(w: &Walker) {
+    println!(
+        "tail sway: gain {:.2}  rate {:.2} rad/s  ({:.1} s a sway)  reach x {:.0} y {:.0} at gain 1",
+        w.sway,
+        w.sway_rate,
+        std::f32::consts::TAU / w.sway_rate,
+        TAIL_SWAY_X,
+        TAIL_SWAY_Y
     );
 }
 
@@ -1172,6 +1236,27 @@ fn main() -> Result<(), String> {
                         report(light, steps, tex_idx, textures[tex_idx].0);
                         report_eyes(&walker);
                         report_ears();
+                        report_tail(&walker);
+                    }
+                    // The tail's idle sway, live while it is being judged -
+                    // amplitude first, because that is what the eye reads, then
+                    // the rate it breathes at. Settled numbers become constants
+                    // in `Walker::new` and these keys go.
+                    sdl2::keyboard::Keycode::K => {
+                        walker.sway = (walker.sway - 0.25).max(0.0);
+                        report_tail(&walker);
+                    }
+                    sdl2::keyboard::Keycode::L => {
+                        walker.sway = (walker.sway + 0.25).min(3.0);
+                        report_tail(&walker);
+                    }
+                    sdl2::keyboard::Keycode::N => {
+                        walker.sway_rate = (walker.sway_rate - 0.15).max(0.15);
+                        report_tail(&walker);
+                    }
+                    sdl2::keyboard::Keycode::M => {
+                        walker.sway_rate = (walker.sway_rate + 0.15).min(2.5);
+                        report_tail(&walker);
                     }
                     // Height as an angle round the head's centre, not an offset
                     // from the ground: raising an ear walks it up the sphere,
@@ -2477,6 +2562,9 @@ mod walk_tests {
         );
         // It keeps moving after the turn stops. Damped like the body it snapped
         // back and died within a quarter second.
+        // The idle sway is switched off for this measurement: it is a driver,
+        // and with it running any tail would pass, including a dead one.
+        w.sway = 0.0;
         let angle = |doll: &Ragdoll| {
             let tip = doll.particles[*c.tail.last().unwrap()].pos;
             let d = tip.sub(doll.particles[c.tail[0]].pos);
@@ -2501,6 +2589,58 @@ mod walk_tests {
             travel.to_degrees() > 20.0,
             "the tail stops dead once the turn ends: {:.1} degrees in 1.5 s",
             travel.to_degrees()
+        );
+    }
+
+    #[test]
+    fn the_tail_sways_when_the_animal_stands_still() {
+        // The root is driven round a slow oval, and the free chain behind it
+        // follows. Correct and dead was the previous state: every ball past the
+        // root is a free link with nothing to push it.
+        //
+        // Measured as the ground the tip covers while standing, with the driver
+        // on and off. The two have to be told apart, or "it moves" means only
+        // "it has not finished settling".
+        fn travel(sway: f32, settle: usize) -> f32 {
+            let (mut doll, c, rest, mut w) = rig();
+            w.sway = sway;
+            let dt = 1.0 / 120.0;
+            // Let the chain fall to wherever it hangs before measuring it.
+            for _ in 0..settle {
+                w.advance(dt, 0.0, 0.0);
+                w.pose(&mut doll, &c, &rest);
+                doll.step(dt);
+            }
+            let tip = *c.tail.last().unwrap();
+            let (mut xlo, mut xhi) = (f32::INFINITY, f32::NEG_INFINITY);
+            let (mut ylo, mut yhi) = (f32::INFINITY, f32::NEG_INFINITY);
+            for _ in 0..480 {
+                w.advance(dt, 0.0, 0.0);
+                w.pose(&mut doll, &c, &rest);
+                doll.step(dt);
+                let p = doll.particles[tip].pos;
+                xlo = xlo.min(p.x);
+                xhi = xhi.max(p.x);
+                ylo = ylo.min(p.y);
+                yhi = yhi.max(p.y);
+            }
+            (xhi - xlo).max(yhi - ylo)
+        }
+        // Twenty seconds of settling before either measurement. The chain is
+        // damped very lightly on purpose (`drag` 0.998), so a transient from the
+        // authored pose rings for ten or more seconds - measuring earlier reads
+        // settling drift as motion, and the numbers do not separate: at one
+        // second the driver-off tail still covers 26 units.
+        let settle = 2400;
+        let still = travel(0.0, settle);
+        let moving = travel(1.0, settle);
+        assert!(
+            still < 1.0,
+            "the tail drifts {still:.2} units with the driver switched off"
+        );
+        assert!(
+            moving > 4.0,
+            "the tail barely moves with the driver on: {moving:.2} units in four seconds"
         );
     }
 }

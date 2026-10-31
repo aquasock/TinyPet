@@ -23,7 +23,7 @@ Two consequences worth stating plainly:
 ## Running it
 
 ```sh
-cargo test --workspace                  # 62 tests
+cargo test --workspace                  # 67 tests
 cargo run --release -p petz-sdl --bin ragdoll            # dev: 640x480 window
 cargo run --release -p petz-sdl --bin ragdoll            # PETZ_MODE=low for 320x240
 ```
@@ -49,7 +49,9 @@ draw every constraint as a line, **`W`/`S` forward and back**, **`A`/`D` turn le
 (hold, not toggle; `Q`/`E` are the same), `+`/`-` speed, `V` view pitch, arrows
 move the light, `Z`/`X` ambience, `[`/`]` ramp steps, `T` texture, `,`/`.` spine
 flex, `Tab` ball numbers, `P` print settings, `R` reset, `Space` pause, `Esc`
-quit.
+quit. `K`/`L` scale the tail's idle sway and `N`/`M` speed it up or slow it
+down - live while the shape of the motion is still being judged; `P` prints
+where they stand.
 
 The **ear balls** have no live controls either. They were tuned from the
 keyboard - four pairs, `B` switching between the bases and the tips - and the
@@ -152,7 +154,8 @@ is asserted as a regression test.
   anus, which is level - and is driven there at `follow = 0.25`. Every ball past
   it (44-47) carries no target at all, so the chain dangles and can swing right
   round the root. Left unanimated that reads as a broken tail: the shape is
-  right, what it needs is motion. Driving the chain made it a rigid rod; leaving
+  right, what it needs is motion. The root is now driven round a slow oval - see
+  "The tail's motion" below. Driving the chain made it a rigid rod; leaving
   the root slack dropped the whole tail under the cat.
 - **Four claws a foot.** Black balls of radius 2 on the arc of radius
   foot + claw, so each is tangent to the foot rather than buried in it, spread
@@ -351,6 +354,55 @@ renderer as copies of the eye shells; a bespoke z order for the ears; deriving
 ear height by angle round the skull the way the eye is placed - the eye orbits
 the surface, but an ear is attached at a point. Pinning costs the flop: a pinned
 ear is rigid, and giving it swing means giving it its own solver drive.
+
+## The tail's motion
+
+The shape was never the problem; stillness was. Every ball past the root is a
+free link with no target, so a root held at a fixed point leaves the whole chain
+hanging dead - correct, and read as broken.
+
+The fix is one driver on the root and nothing else touched:
+
+```
+TAIL_SWAY_X     6.0   body units fore-and-aft
+TAIL_SWAY_Y     4.0   body units up and down
+TAIL_SWAY_RATE  0.9   rad/s, about 7 s to a full sway
+TAIL_GAIT_X     5.0   one extra swing per stride, in phase with the legs
+```
+
+Two rates, the second twice the first and 0.6 rad out of phase, so the root
+traces an oval rather than a line traced out and back. While walking the gait's
+own phase adds a swing per stride on top, so the tail answers the legs instead of
+only the clock.
+
+The amplitude is small because the chain multiplies it: the root survives the
+weak drive (`follow = 0.25`) and the four free balls behind it lag and overshoot.
+Measured at gain 1, standing, the tip covers **6.7 body units** in a four-second
+window, which at the default zoom is **11 px** of horizontal reach on screen -
+about a third of the tail's own length, and enough to be seen without the tail
+reading as a wagging stick. The driving is the only thing in the frame that
+moves while the animal stands: a two-frame diff across 3.5 s changed 232 pixels,
+231 of them in the rear quarter where the tail is.
+
+Two things learned while instrumenting it, both worth keeping:
+
+- **The free chain rings for ten seconds or more.** `drag` 0.998 is deliberate
+  - it is what makes a tail a tail - but it also means a transient from the
+  authored pose takes ~20 s to die. Any measurement of "does the tail move"
+  taken earlier measures settling, not motion: at a one-second settle the
+driver-off tail still covers 26 units. The test waits twenty seconds, after
+  which the same measurement is 0.2 units with the driver off against 6.7 with
+  it on.
+- **A driven chain can pass a damping test on its own.** The tail-liveliness
+  test (75 degrees of travel after a turn, against 20 damped like the body)
+  would report a dead tail as lively once the root is animated, so it silences
+  the driver (`w.sway = 0`) and measures the physics alone. The sway has its own
+  test, and it compares against the same animal with the driver off rather than
+  against zero.
+
+The keys `K`/`L` and `N`/`M` adjust gain and rate live. When the motion is
+settled by eye, the numbers become constants and the keys go, the same way the
+ears and then the eyes were finished.
 
 ## Next: the nose
 

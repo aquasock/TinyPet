@@ -8,16 +8,25 @@ Read this as orientation, not law. Refresh live state (`git status`, `git log`,
 
 - **The animal is a soft body of 48 balls**: spine 0-3, head 4-6, ears 7-10,
   eyes 11-14, four legs 15-42 (hip, knee, foot, four claws each), tail 43-47.
-- **Walking works again** - `W`/`S`, `A`/`D` - and there is no animation beyond
-  the gait: the tail hangs and swings on physics only, and the ears are rigidly
-  placed.
+- **Walking works again** - `W`/`S`, `A`/`D`. There is no animation beyond the
+  gait and the tail's idle sway: the ears are still rigidly placed.
 - **The surface is 320x240**, the animal at half its authored size, in two
   window modes.
-- Tree clean, `main` level with `origin/main` at `fefa649`.
+- One commit ahead of `origin/main`: the tail's motion, not yet pushed.
 
 ## Landed since the last handoff
 
-`ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`, all pushed:
+**The tail's idle sway.** The root is driven round a slow oval
+(`TAIL_SWAY_X/Y/RATE`, plus one swing per stride while walking) instead of being
+held at a fixed point, and the free chain behind it carries the motion. `K`/`L`
+scale it and `N`/`M` speed it up while it is being judged. Measured at gain 1:
+the tip covers 6.7 body units in four seconds, 11 px of screen reach; a two-frame
+diff while standing changes 232 pixels and 231 of them are in the tail's corner.
+`the_tail_sways_when_the_animal_stands_still` waits 20 s before measuring,
+because the chain rings for ten, and the older liveliness test silences the
+driver so it still measures the physics.
+
+Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 
 - the ears locked down: bases at (-2, 28), apart 14, radius 9.5; tips 12 above,
   radius 6.5, sunk 0.2; no live keys
@@ -30,9 +39,10 @@ Read this as orientation, not law. Refresh live state (`git status`, `git log`,
 
 ## Verified, and how
 
-- `cargo test --workspace`: 68 tests green (39 core, 2 silhouette, 25 in the
-  sandbox binary, 2 misc). The counts test expects 48 balls, 11 on the head,
-  sixteen claws, five tail balls.
+- `cargo test --workspace`: 67 tests green (39 core, 2 silhouette, 26 in the
+  sandbox binary). The counts test expects 48 balls, 11 on the head, sixteen
+  claws, five tail balls. The previous handoff said 68 and "2 misc"; there is no
+  such pair - 67 is what actually runs.
 - Tail liveliness, measured as degrees of travel after a turn ends: 75 with the
   tail's own damping against 20 damped like the body.
 - Hips, measured against a rigid body through a full-rate turn: 0.2-1.1 px, and
@@ -66,10 +76,18 @@ Read this as orientation, not law. Refresh live state (`git status`, `git log`,
 
 ## Next step
 
-The roadmap the user agreed, in order: **tail and ear motion** (a slow sway on
-the tail's root target, then gait coupling; the ears want the same `drag`
-treatment so they are livelier than the body), then **the face** - mouth,
-tongue, and eyelid states for excited, playful, sad, scared.
+The roadmap the user agreed, in order: **tail and ear motion**, then **the face**
+- mouth, tongue, and eyelid states for excited, playful, sad, scared.
+
+Tail motion is in, and unjudged by eye. So, in order:
+
+1. Look at it - `./target/release/ragdoll`, `K`/`L` for reach and `N`/`M` for
+   rate. Standing and walking are two different judgements: the walk adds a
+   swing per stride.
+2. The ears, still rigid. They want what the tail got - a little lag on the tip,
+   so they are livelier than the skull without the pair drifting apart. After the
+   tail settles, not alongside it.
+3. Then the face.
 
 ## Continuation
 
