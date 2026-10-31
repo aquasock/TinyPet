@@ -9,32 +9,26 @@ Read this as orientation, not law. Refresh live state (`git status`, `git log`,
 - **The animal is a soft body of 48 balls**: spine 0-3, head 4-6, ears 7-10,
   eyes 11-14, four legs 15-42 (hip, knee, foot, four claws each), tail 43-47.
 - **Walking works again** - `W`/`S`, `A`/`D`. There is no animation beyond the
-  gait and the tail's idle sway: the ears are still rigidly placed.
+  gait: the ears are rigidly placed and the tail is not animated at all.
 - **The surface is 320x240**, the animal at half its authored size, in two
   window modes.
-- One commit ahead of `origin/main`: the tail's motion, not yet pushed.
+- Four commits ahead of `origin/main`, none pushed.
 
 ## Landed since the last handoff
 
-**The tail's idle sway.** The root is pinned to the butt ball - derived from it
-every frame, like a hip from its spine ball - because driven it wandered 6.1 body
-units off the rump in a walking step and the base of the tail hovered behind the
-cat. The sway now drives the first *free* ball instead (`TAIL_SWAY_X/Y/RATE`,
-`TAIL_DRIVE` 0.10, plus one swing per stride while walking), so the joint cannot
-open and the four free links carry the motion out: 8.75 body units of tip travel
-at gain 1. There is also a lateral glide down the chain (`TAIL_LATERAL`,
-`TAIL_LATERAL_LAG`) riding on the rump's own lateral flex, because the solver is
-sagittal and the fore-and-aft sway is edge-on when the animal faces the camera. `K`/`L` scale it and `N`/`M` speed it up while it is being judged, and the two
-values are drawn on the surface under the facing reading for four seconds after
-each press (`GAIN` then `RATE`), with the same numbers in the window title. Measured at gain 1: the tip covers 6.7 body
-units in four seconds, 11 px of screen reach in profile, 17 px of diff at the
-rear facing the camera; a two-frame diff while standing changes 232 pixels and
-231 of them are in the tail's corner. Tuning keys ignore auto-repeat now: holding
-`K` used to walk the gain to zero in five steps, which read as "the keys do
-nothing".
-`the_tail_sways_when_the_animal_stands_still` waits 20 s before measuring,
-because the chain rings for ten, and the older liveliness test silences the
-driver so it still measures the physics.
+**The tail's root is welded to the rump.** Ball 43 was driven toward a place
+behind the cat, so it lagged whatever moved the rump: 6.1 body units off in a
+walking step, visible as a tail base hovering behind the animal. It is now
+placed from the butt ball every frame, pinned, like a hip from its spine ball,
+and the chain sits on the rump's lateral plane so the spine's flex cannot step
+the joint sideways. Exact at placement; 0.31 units stale after a step.
+
+**The tail's sway was built and then dropped.** An animated sway was tuned in the
+window and measured - an oval traced by the ball one link in from the root, a
+lateral glide down the chain, live keys, an on-screen readout - and then removed
+at the owner's request. The tail is physics only: it trails the rump, and hangs
+when the animal stands. The readout's text path went with it. `docs/SANDBOX.md`
+has the numbers and the reasons, so it need not be rebuilt blind.
 
 Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 
@@ -49,12 +43,15 @@ Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 
 ## Verified, and how
 
-- `cargo test --workspace`: 70 tests green (39 core, 2 silhouette, 29 in the
+- `cargo test --workspace`: 67 tests green (39 core, 2 silhouette, 26 in the
   sandbox binary). The counts test expects 48 balls, 11 on the head, sixteen
   claws, five tail balls. The previous handoff said 68 and "2 misc"; there is no
   such pair.
 - Tail liveliness, measured as degrees of travel after a turn ends: 75 with the
-  tail's own damping against 20 damped like the body.
+  tail's own damping against 20 damped like the body. That is the chain answering
+  the body, with nothing driving it.
+- The tail root's weld: exact at placement, and under 1.5 units of residual after
+  any step of turning, walking, both, or standing.
 - Hips, measured against a rigid body through a full-rate turn: 0.2-1.1 px, and
   the hip-to-spine gap fixed at its authored 20 units.
 - Outline weight, counted from a frame: 2 px in 52% of runs, 3 px in 20% (where
@@ -78,8 +75,10 @@ Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 - The tail is one **pinned** root and four free balls, with soft links and a
   per-ball `drag` multiplier of about 0.998/0.985. The root is derived from the
   butt ball every frame, never driven: driven, it lags the rump and the joint
-  opens. Driving the whole chain makes a rod; driving the first free ball at 0.10
-  does not.
+  opens.
+- **The tail is not animated.** A sway was built, measured and removed. Do not
+  add one back without asking: the owner's line is that the tail is a physical
+  thing that trails the body.
 - The spine is a plain chain plus one brace (skull to spine[2]). Its diagonals
   were measured at 2.4 degrees of fold and removed.
 - Palette is a diagnostic set: black fur, snout and ear bases blue (240), nose
@@ -88,18 +87,15 @@ Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 
 ## Next step
 
-The roadmap the user agreed, in order: **tail and ear motion**, then **the face**
-- mouth, tongue, and eyelid states for excited, playful, sad, scared.
+The roadmap the user agreed: **ear motion**, then **the face** - mouth, tongue,
+and eyelid states for excited, playful, sad, scared. Tail animation is off the
+list by decision.
 
-Tail motion is in, and unjudged by eye. So, in order:
-
-1. Look at it - `./target/release/ragdoll`, `K`/`L` for reach and `N`/`M` for
-   rate. Standing and walking are two different judgements: the walk adds a
-   swing per stride.
-2. The ears, still rigid. They want what the tail got - a little lag on the tip,
-   so they are livelier than the skull without the pair drifting apart. After the
-   tail settles, not alongside it.
-3. Then the face.
+1. The ears are rigidly placed. What was asked of the tail - a little life that
+   the body's own motion cannot supply - is still being asked of them, so the
+   question that killed the tail's sway applies: is this animation, or physics?
+   Ask before building it.
+2. Then the face.
 
 ## Continuation
 

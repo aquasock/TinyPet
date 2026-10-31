@@ -99,41 +99,6 @@ const EAR_TIP_SINK: f32 = 0.20;
 /// is 1.0; the tail is deliberately looser so the chain can stretch and whip.
 const TAIL_LINK: f32 = 0.12;
 
-/// The idle sway on the tail's root: how far it travels fore-and-aft and up and
-/// down, in body units, and how fast it breathes, in radians per second.
-///
-/// Small on purpose. The root is held weakly (`follow = 0.25`), so it drags the
-/// free chain behind it at a distance: six units here is a good many more at the
-/// tip, and a root that swings visibly by itself reads as a wagging stick.
-const TAIL_SWAY_X: f32 = 6.0;
-const TAIL_SWAY_Y: f32 = 4.0;
-const TAIL_SWAY_RATE: f32 = 0.9;
-
-/// How hard the sway drives the first free tail ball. Light: this is a bend at
-/// the base of the tail, not a target the chain has to fight. Driving every ball
-/// made the tail a rigid rod; driving one, weakly, lets the rest whip.
-const TAIL_DRIVE: f32 = 0.10;
-
-/// How long the on-screen readout of the tail's values stays up after a key
-/// moves one of them. Long enough to press a key and then read it.
-const READOUT_SECS: f32 = 4.0;
-
-/// One extra swing per stride, in the same units as `TAIL_SWAY_X`, so the tail
-/// answers the legs instead of only the clock.
-const TAIL_GAIT_X: f32 = 5.0;
-
-/// The lateral half of the sway: how far the *tip* is carried side to side, in
-/// body units, and how much phase each ball down the chain loses.
-///
-/// The solver runs in the animal's own sagittal plane, so the chain's own motion
-/// is fore-and-aft - which at a heading near zero points almost straight into
-/// the screen, and the tail looks still however hard the root is driven. A tail
-/// also sways side to side. That part is authored, per ball, the same way the
-/// spine's lateral flex is; the growing amplitude and the delay down the chain
-/// are what make it travel instead of sliding the whole tail sideways at once.
-const TAIL_LATERAL: f32 = 12.0;
-const TAIL_LATERAL_LAG: f32 = 0.45;
-
 /// The claw ball's radius. Small enough that four of them across a foot's toe
 /// are separate dots at 320x240 rather than one blob.
 const CLAW_RADIUS: f32 = 2.0;
@@ -184,49 +149,24 @@ const DIGITS: [[u8; 5]; 10] = [
     [0b111, 0b101, 0b111, 0b001, 0b111],
 ];
 
-/// One 3x5 glyph, in the same cell as the digits. This is not a font - it is
-/// the handful of capitals the on-screen readouts have to spell, plus a full
-/// stop so a value can be written the way it is printed.
-fn glyph(ch: char) -> Option<[u8; 5]> {
-    Some(match ch {
-        '0'..='9' => DIGITS[ch.to_digit(10)? as usize],
-        'A' => [0b010, 0b101, 0b111, 0b101, 0b101],
-        'E' => [0b111, 0b100, 0b111, 0b100, 0b111],
-        'G' => [0b111, 0b100, 0b101, 0b101, 0b111],
-        'I' => [0b111, 0b010, 0b010, 0b010, 0b111],
-        'N' => [0b101, 0b111, 0b101, 0b101, 0b101],
-        'R' => [0b110, 0b101, 0b110, 0b101, 0b101],
-        'T' => [0b111, 0b010, 0b010, 0b010, 0b010],
-        '.' => [0b000, 0b000, 0b000, 0b000, 0b010],
-        _ => return None,
-    })
-}
-
-/// Draw a short string in window coordinates. Every glyph takes a 3x5 cell plus
-/// one pixel of gap whether it uses the width or not, so columns line up without
-/// any measuring: a fixed decimal place is fixed because the format writes the
-/// same number of characters every time.
-fn draw_text(
+/// Draw a non-negative integer in window coordinates.
+fn draw_number(
     canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
     x: i32,
     y: i32,
     scale: i32,
-    text: &str,
+    value: i32,
 ) {
-    let cells = text.chars().count() as i32;
+    let text = value.max(0).to_string();
+    let width = text.len() as i32 * 4 * scale;
     let _ = canvas.set_draw_color(Color::RGB(0, 0, 0));
-    let _ = canvas.fill_rect(Rect::new(
-        x - 5,
-        y - 5,
-        (cells * 4 * scale + 9) as u32,
-        (5 * scale + 9) as u32,
-    ));
+    let _ = canvas.fill_rect(Rect::new(x - 5, y - 5, (width + 9) as u32, (5 * scale + 9) as u32));
     let _ = canvas.set_draw_color(Color::RGB(255, 255, 255));
     for (i, ch) in text.chars().enumerate() {
-        let Some(bits) = glyph(ch) else { continue };
-        for (row, line) in bits.iter().enumerate() {
+        let d = ch.to_digit(10).unwrap_or(0) as usize;
+        for (row, bits) in DIGITS[d].iter().enumerate() {
             for col in 0..3 {
-                if line & (1 << (2 - col)) != 0 {
+                if bits & (1 << (2 - col)) != 0 {
                     let _ = canvas.fill_rect(Rect::new(
                         x + i as i32 * 4 * scale + col * scale,
                         y + row as i32 * scale,
@@ -237,17 +177,6 @@ fn draw_text(
             }
         }
     }
-}
-
-/// Draw a non-negative integer in window coordinates.
-fn draw_number(
-    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
-    x: i32,
-    y: i32,
-    scale: i32,
-    value: i32,
-) {
-    draw_text(canvas, x, y, scale, &value.max(0).to_string());
 }
 
 fn repo_root() -> PathBuf {
@@ -615,18 +544,6 @@ struct Walker {
     eye_lift: f32,
     /// Last movement input, so the pose knows whether to animate a gait.
     moving: f32,
-    /// Simulated seconds. Only the tail's idle sway reads it, and it advances
-    /// with the fixed physics step rather than the frame clock: a frame is
-    /// however many steps the accumulator owed, so the frame clock would make
-    /// the sway depend on how fast the machine is.
-    clock: f32,
-    /// How much of that sway to apply, live, 0 to 3. One is the tuned default;
-    /// a test that wants to measure the chain's own liveliness sets it to 0, so
-    /// it measures damping rather than the driver.
-    sway: f32,
-    /// How fast the sway breathes, in radians per second. Live, because the
-    /// difference between a tail and a metronome is entirely this number.
-    sway_rate: f32,
 }
 
 /// Fastest the animal's body can turn, in radians per second.
@@ -697,9 +614,6 @@ impl Walker {
             lid_tilt: 0.23,
             eye_lift: 12.0,
             moving: 1.0,
-            clock: 0.0,
-            sway: 1.0,
-            sway_rate: TAIL_SWAY_RATE,
         }
     }
 
@@ -725,10 +639,6 @@ impl Walker {
     /// `moving` is +1 forward, -1 backward, 0 standing. `turning` is -1 left,
     /// +1 right, 0 straight.
     fn advance(&mut self, dt: f32, moving: f32, turning: f32) {
-        // The sway clock runs whether or not the animal moves: a standing cat's
-        // tail is never still, and that slow drift is most of what says the
-        // body is alive rather than parked.
-        self.clock += dt;
         // Turning happens whether or not the animal is moving - a dog can look
         // round while standing.
         self.body.heading += turning * TURN_BUTTON_RATE * dt;
@@ -863,7 +773,6 @@ impl Walker {
         // like a chain and can swing right round the root. Left unanimated that
         // looks like a broken tail; what it needs is motion, not a shape.
         const ROOT_LIFT: f32 = 13.0;
-        let t = self.clock;
         if let Some(&root) = creature.tail.first() {
             // The root grows out of the rump, so it is placed on the ball it
             // grows out of: the offset it holds in the rest pose, carried on the
@@ -885,52 +794,15 @@ impl Walker {
             doll.set_rest(creature.spine[0], root, off.length());
         }
 
-        // The fore-and-aft half of the sway drives the first *free* ball, not
-        // the root. Moving the root opens the joint, which is the whole reason
-        // the root is pinned; a weak drive one ball further along bends the base
-        // of the tail and the four free links carry the motion out to the tip.
-        if let (Some(&first), Some(&root)) = (creature.tail.get(1), creature.tail.first()) {
-            if self.sway > 0.0 {
-                let rel = rest.tail[1].sub(rest.tail[0]);
-                // Two rates, the second twice the first and out of phase, so the
-                // path is an oval rather than a line traced back and forth.
-                let sway_x = (t * self.sway_rate).sin();
-                let sway_y = (t * self.sway_rate * 2.0 + 0.6).sin();
-                // Walking adds one swing per stride, in phase with the legs.
-                let stride = if walking {
-                    (self.gait.phase * std::f32::consts::TAU).sin()
-                } else {
-                    0.0
-                };
-                let base = doll.particles[root].pos;
-                let goal = Vec2::new(
-                    base.x + rel.x - self.sway * (TAIL_SWAY_X * sway_x + TAIL_GAIT_X * stride),
-                    base.y + rel.y - self.sway * TAIL_SWAY_Y * sway_y,
-                );
-                doll.drive_to(first, goal, TAIL_DRIVE);
-            } else if let Some(p) = doll.particles.get_mut(first) {
-                // With the sway off the whole chain is free, which is what a
-                // measurement of its damping needs.
-                p.target = None;
-                p.follow = 0.0;
-            }
-        }
-
-        // The side-to-side half, which is what reads when the animal faces the
-        // camera. Authored per ball with a delay down the chain, so the sway
-        // travels to the tip instead of the tail shifting as one piece.
+        // The chain hangs off the rump, so every ball sits on the rump's own
+        // lateral plane. The spine's lateral flex is authored, and without this
+        // the joint steps sideways by the whole of it - the same opening as a
+        // driven root, in the other axis.
         {
-            let n = creature.tail.len().max(1) as f32;
-            // The chain hangs off the rump, so it carries the rump's own lateral
-            // flex as a base and the sway rides on top of it. Without that the
-            // joint steps sideways by the whole of the spine's flex, which is
-            // the same opening in the other axis.
             let base_side = doll.particles[creature.spine[0]].side;
-            for (i, &ball) in creature.tail.iter().enumerate() {
-                let reach = (i as f32 + 1.0) / n;
-                let phase = t * self.sway_rate - i as f32 * TAIL_LATERAL_LAG;
+            for &ball in creature.tail.iter() {
                 if let Some(p) = doll.particles.get_mut(ball) {
-                    p.side = base_side + self.sway * TAIL_LATERAL * reach * phase.sin();
+                    p.side = base_side;
                 }
             }
         }
@@ -980,9 +852,6 @@ struct Pose {
     spine: Vec<Vec2>,
     head: Vec<Vec2>,
     legs: Vec<Vec2>,
-    /// Authored tail positions, kept so the sway can be aimed relative to the
-    /// root without re-deriving the chain's spacings every frame.
-    tail: Vec<Vec2>,
     hip_to_knee: Vec<f32>,
     knee_to_foot: Vec<f32>,
 }
@@ -991,7 +860,6 @@ fn measure(doll: &Ragdoll, c: &Creature) -> Pose {
     let spine = c.spine.iter().map(|&i| doll.particles[i].pos).collect();
     let head = c.head.iter().map(|&i| doll.particles[i].pos).collect();
     let legs: Vec<Vec2> = c.legs.iter().map(|l| doll.particles[l.hip].pos).collect();
-    let tail = c.tail.iter().map(|&i| doll.particles[i].pos).collect();
     let hip_to_knee = c
         .legs
         .iter()
@@ -1002,7 +870,7 @@ fn measure(doll: &Ragdoll, c: &Creature) -> Pose {
         .iter()
         .map(|l| doll.particles[l.knee].pos.sub(doll.particles[l.foot].pos).length())
         .collect();
-    Pose { spine, head, legs, tail, hip_to_knee, knee_to_foot }
+    Pose { spine, head, legs, hip_to_knee, knee_to_foot }
 }
 
 /// Shortest signed difference between two angles, in (-pi, pi].
@@ -1063,25 +931,6 @@ fn report_ears() {
     );
     println!(
         "ear tips:  back {EAR_TIP_BACK:.1}  up {EAR_TIP_UP:.1}  size {EAR_TIP_SIZE:.1}  sink {EAR_TIP_SINK:.2}"
-    );
-}
-
-/// Put the live tuning numbers in the window title, where they can be read
-/// without going back to the terminal that started the app.
-fn show_sway(canvas: &mut sdl2::render::Canvas<sdl2::video::Window>, w: &Walker) {
-    let _ = canvas.window_mut().set_title(&format!(
-        "petz ragdoll sandbox - sway {:.2} x {:.2} rad/s",
-        w.sway, w.sway_rate
-    ));
-}
-
-fn report_tail(w: &Walker) {    println!(
-        "tail sway: gain {:.2}  rate {:.2} rad/s  ({:.1} s a sway)  reach x {:.0} y {:.0} at gain 1",
-        w.sway,
-        w.sway_rate,
-        std::f32::consts::TAU / w.sway_rate,
-        TAIL_SWAY_X,
-        TAIL_SWAY_Y
     );
 }
 
@@ -1242,8 +1091,6 @@ fn main() -> Result<(), String> {
     let mut depth = DepthBuffer::new(W, H);
     // Ball numbers, for referring to them. Tab toggles.
     let mut show_ids = true;
-    // Seconds left to show the tail's tuning values after a key moved them.
-    let mut sway_readout = 0.0f32;
     // Diagnostics: red outlines under PETZ_DIAG, so the ear ordering shows up.
     let outline = if std::env::var("PETZ_DIAG").is_ok() { DIAG_OUTLINE } else { OUTLINE };
 
@@ -1263,7 +1110,6 @@ fn main() -> Result<(), String> {
          drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
          light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
          (the ear balls are frozen: no keys - see EAR_* in the source)\n\
-         tail sway: K/L reach, N/M rate (values appear under the facing)\n\
          Shift+drag: carry the whole animal   G: constraint links\n\
          Tab: ball numbers   P: settings   R: reset   Space: pause   Esc: quit"
     );
@@ -1361,35 +1207,6 @@ fn main() -> Result<(), String> {
                         report(light, steps, tex_idx, textures[tex_idx].0);
                         report_eyes(&walker);
                         report_ears();
-                        report_tail(&walker);
-                    }
-                    // The tail's idle sway, live while it is being judged -
-                    // amplitude first, because that is what the eye reads, then
-                    // the rate it breathes at. Settled numbers become constants
-                    // in `Walker::new` and these keys go.
-                    sdl2::keyboard::Keycode::K => {
-                        walker.sway = (walker.sway - 0.25).max(0.0);
-                        sway_readout = READOUT_SECS;
-                        report_tail(&walker);
-                        show_sway(&mut canvas, &walker);
-                    }
-                    sdl2::keyboard::Keycode::L => {
-                        walker.sway = (walker.sway + 0.25).min(3.0);
-                        sway_readout = READOUT_SECS;
-                        report_tail(&walker);
-                        show_sway(&mut canvas, &walker);
-                    }
-                    sdl2::keyboard::Keycode::N => {
-                        walker.sway_rate = (walker.sway_rate - 0.15).max(0.15);
-                        sway_readout = READOUT_SECS;
-                        report_tail(&walker);
-                        show_sway(&mut canvas, &walker);
-                    }
-                    sdl2::keyboard::Keycode::M => {
-                        walker.sway_rate = (walker.sway_rate + 0.15).min(2.5);
-                        sway_readout = READOUT_SECS;
-                        report_tail(&walker);
-                        show_sway(&mut canvas, &walker);
                     }
                     // Height as an angle round the head's centre, not an offset
                     // from the ground: raising an ear walks it up the sphere,
@@ -1536,7 +1353,6 @@ fn main() -> Result<(), String> {
         let now = Instant::now();
         let frame_dt = (now - last).as_secs_f32().min(0.1);
         acc += frame_dt as f64;
-        sway_readout = (sway_readout - frame_dt).max(0.0);
         last = now;
 
         // Instrument: rotate steadily and stand still, so a sweep can be read
@@ -1833,14 +1649,6 @@ fn main() -> Result<(), String> {
         // to the right, 180 is towards the viewer, 270 to the left.
         let facing = walker.heading_body.to_degrees().rem_euclid(360.0).round() as i32;
         draw_number(&mut canvas, 18, 18, 4, facing);
-
-        // The tail's two live values, under the facing, for a few seconds after
-        // they are touched - long enough to read a number off the window while
-        // pressing a key with the other hand, then out of the way of the animal.
-        if sway_readout > 0.0 {
-            draw_text(&mut canvas, 18, 54, 3, &format!("GAIN {:.2}", walker.sway));
-            draw_text(&mut canvas, 18, 78, 3, &format!("RATE {:.2}", walker.sway_rate));
-        }
 
         // A number on every ball, just above it, so one can be named exactly.
         if show_ids {
@@ -2670,10 +2478,6 @@ mod walk_tests {
         // root (the tail drops under the cat), and a chain damped like the body,
         // which swings out and snaps back and reads as stiff.
         let (mut doll, c, rest, mut w) = rig();
-        // The sway is off for this one: it drives the first free ball, and the
-        // shape being measured here is what the chain does with nothing driving
-        // it at all.
-        w.sway = 0.0;
         for _ in 0..90 {
             w.pose(&mut doll, &c, &rest);
             doll.step(1.0 / 120.0);
@@ -2780,111 +2584,5 @@ mod walk_tests {
         );
     }
 
-    #[test]
-    fn the_tail_sways_when_the_animal_stands_still() {
-        // The root is driven round a slow oval, and the free chain behind it
-        // follows. Correct and dead was the previous state: every ball past the
-        // root is a free link with nothing to push it.
-        //
-        // Measured as the ground the tip covers while standing, with the driver
-        // on and off. The two have to be told apart, or "it moves" means only
-        // "it has not finished settling".
-        fn travel(sway: f32, settle: usize) -> f32 {
-            let (mut doll, c, rest, mut w) = rig();
-            w.sway = sway;
-            let dt = 1.0 / 120.0;
-            // Let the chain fall to wherever it hangs before measuring it.
-            for _ in 0..settle {
-                w.advance(dt, 0.0, 0.0);
-                w.pose(&mut doll, &c, &rest);
-                doll.step(dt);
-            }
-            let tip = *c.tail.last().unwrap();
-            let (mut xlo, mut xhi) = (f32::INFINITY, f32::NEG_INFINITY);
-            let (mut ylo, mut yhi) = (f32::INFINITY, f32::NEG_INFINITY);
-            for _ in 0..480 {
-                w.advance(dt, 0.0, 0.0);
-                w.pose(&mut doll, &c, &rest);
-                doll.step(dt);
-                let p = doll.particles[tip].pos;
-                xlo = xlo.min(p.x);
-                xhi = xhi.max(p.x);
-                ylo = ylo.min(p.y);
-                yhi = yhi.max(p.y);
-            }
-            (xhi - xlo).max(yhi - ylo)
-        }
-        // Twenty seconds of settling before either measurement. The chain is
-        // damped very lightly on purpose (`drag` 0.998), so a transient from the
-        // authored pose rings for ten or more seconds - measuring earlier reads
-        // settling drift as motion, and the numbers do not separate: at one
-        // second the driver-off tail still covers 26 units.
-        let settle = 2400;
-        let still = travel(0.0, settle);
-        let moving = travel(1.0, settle);
-        assert!(
-            still < 1.0,
-            "the tail drifts {still:.2} units with the driver switched off"
-        );
-        assert!(
-            moving > 4.0,
-            "the tail barely moves with the driver on: {moving:.2} units in four seconds"
-        );
-    }
 
-    #[test]
-    fn every_character_the_readout_writes_has_a_glyph() {
-        // A missing glyph draws nothing, so a value would silently lose a digit
-        // and the readout would lie. These are the strings the two formats can
-        // produce at the ends of their ranges.
-        for text in ["GAIN 0.00", "GAIN 3.00", "RATE 0.15", "RATE 2.50", "0123456789"] {
-            // The space is the one character that is meant to draw nothing; it
-            // still costs a cell, which is what keeps the columns aligned.
-            for ch in text.chars().filter(|c| *c != ' ') {
-                assert!(glyph(ch).is_some(), "{ch:?} would draw as a blank cell");
-            }
-        }
-    }
-
-    #[test]
-    fn the_tail_sways_sideways_where_the_fore_and_aft_motion_is_edge_on() {
-        // Facing the camera, the chain's own motion points straight into the
-        // screen: the sagittal sway is edge-on and the tail looks still however
-        // hard its root is driven. The lateral half is authored per ball, with a
-        // delay down the chain - which is also what makes it read as a swing
-        // rather than the whole tail being shifted sideways in one piece.
-        let (mut doll, c, rest, mut w) = rig();
-        let dt = 1.0 / 120.0;
-        let mut run = |w: &mut Walker, doll: &mut Ragdoll, n: usize| {
-            for _ in 0..n {
-                w.advance(dt, 0.0, 0.0);
-                w.pose(doll, &c, &rest);
-                doll.step(dt);
-            }
-        };
-        w.sway = 0.0;
-        run(&mut w, &mut doll, 240);
-        for &i in &c.tail {
-            assert!(
-                doll.particles[i].side.abs() < 1e-6,
-                "ball {i} sits off the centre line with the sway switched off"
-            );
-        }
-        w.sway = 1.0;
-        let mut peak = vec![0.0f32; c.tail.len()];
-        for _ in 0..300 {
-            w.advance(dt, 0.0, 0.0);
-            w.pose(&mut doll, &c, &rest);
-            doll.step(dt);
-            for (k, &b) in c.tail.iter().enumerate() {
-                peak[k] = peak[k].max(doll.particles[b].side.abs());
-            }
-        }
-        let tip = peak[peak.len() - 1];
-        assert!(tip > 6.0, "the tip barely moves sideways: {tip:.2} units");
-        assert!(
-            tip > 2.0 * peak[0],
-            "the swing does not grow toward the tip: {peak:?}"
-        );
-    }
 }

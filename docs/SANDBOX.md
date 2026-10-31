@@ -49,9 +49,7 @@ draw every constraint as a line, **`W`/`S` forward and back**, **`A`/`D` turn le
 (hold, not toggle; `Q`/`E` are the same), `+`/`-` speed, `V` view pitch, arrows
 move the light, `Z`/`X` ambience, `[`/`]` ramp steps, `T` texture, `,`/`.` spine
 flex, `Tab` ball numbers, `P` print settings, `R` reset, `Space` pause, `Esc`
-quit. `K`/`L` scale the tail's idle sway and `N`/`M` speed it up or slow it
-down - live while the shape of the motion is still being judged; `P` prints
-where they stand.
+quit.
 
 The **ear balls** have no live controls either. They were tuned from the
 keyboard - four pairs, `B` switching between the bases and the tips - and the
@@ -154,10 +152,10 @@ is asserted as a regression test.
   anus, which is level - and is pinned there, derived from the butt ball every
   frame, the way a hip is derived from the spine ball it hangs from. Every ball past
   it (44-47) carries no target at all, so the chain dangles and can swing right
-  round the root. Left unanimated that reads as a broken tail: the shape is
-  right, what it needs is motion. The root is now driven round a slow oval - see
-  "The tail's motion" below. Driving the chain made it a rigid rod; leaving
-  the root slack dropped the whole tail under the cat.
+  round the root. Nothing animates it: it trails the rump and hangs when the
+  animal stands - see "The tail is not animated" below for what was tried and
+  dropped. Driving the chain made it a rigid rod; driving the root let the joint
+  open; leaving the root slack dropped the whole tail under the cat.
 - **Four claws a foot.** Black balls of radius 2 on the arc of radius
   foot + claw, so each is tangent to the foot rather than buried in it, spread
   across the toe at lateral +-9 and +-3 - the outer pair further back, because a
@@ -356,117 +354,37 @@ ear height by angle round the skull the way the eye is placed - the eye orbits
 the surface, but an ear is attached at a point. Pinning costs the flop: a pinned
 ear is rigid, and giving it swing means giving it its own solver drive.
 
-## The tail's motion
+## The tail is not animated
 
-The shape was never the problem; stillness was. Every ball past the root is a
-free link with no target, so a root held at a fixed point leaves the whole chain
-hanging dead - correct, and read as broken.
+Tried, tuned, measured, and dropped.
 
-The first attempt drove the root itself, and that was wrong for a second reason
-that only showed once the numbers were taken: **the root came off the rump.**
-Measured against the butt ball, a driven root wandered up to 6.1 body units off
-its place in a walking step, so the base of the tail hovered behind the cat. The
-root is part of the body. It is now pinned to the ball it grows out of, exactly
-as a hip is pinned to its spine ball:
+The chain was correct and perfectly still, which read as broken, so a slow sway
+was built: an oval traced by the ball one link along from the root, a lateral
+glide authored per ball down the chain, live `K`/`L`/`N`/`M` keys, and an
+on-screen readout of the two values. It was tuned in the window and measured
+(8.75 body units of tip travel against 0.16 with the driver off). Then it came
+out at the owner's call: the tail should be a physical thing that trails the
+body, not an animation played at it.
 
-```
-root = butt.pos + (252, GROUND - 68 - 13) - butt.rest
-```
+What is left, and stays:
 
-placed every frame, `pinned`, with the butt-to-root link's rest length held at
-the placed distance so the spring never argues with the placement. The residual
-is the butt moving *inside* a step after the placement - 0.31 units, a seventh of
-a surface pixel, corrected on the next frame.
+- **The root is pinned to the butt ball**, placed from it every frame. That was
+  a separate fault the sway exposed - a driven root wandered 6.1 body units off
+  the rump in a walking step - and welding it is right whether or not anything
+  drives the chain. The pose places it exactly; the residual is the butt moving
+  inside a step after the placement, 0.31 units, corrected next frame.
+- **The chain sits on the rump's lateral plane**, so the spine's authored lateral
+  flex cannot step the joint sideways.
+- **Everything else is physics**: soft links at `TAIL_LINK`, `drag` 0.998, and
+  the root being carried by the body. Turning and walking still move the tail,
+  because they move the rump. Standing still, it hangs.
 
-So the sway drives the first **free** ball instead, one long the chain from the
-root:
-
-```
-TAIL_SWAY_X     6.0   body units fore-and-aft
-TAIL_SWAY_Y     4.0   body units up and down
-TAIL_SWAY_RATE  0.9   rad/s, about 7 s to a full sway
-TAIL_GAIT_X     5.0   one extra swing per stride, in phase with the legs
-TAIL_DRIVE      0.10  how hard that ball is pulled toward the sway's target
-```
-
-Two rates, the second twice the first and 0.6 rad out of phase, so the target
-traces an oval rather than a line traced out and back. While walking the gait's
-own phase adds a swing per stride on top, so the tail answers the legs instead of
-only the clock. The drive is light on purpose: this is a bend at the base of the
-tail, not a target the chain has to fight, and the four free links behind it do
-the rest. Driving *every* ball is the fault that made the tail a rigid rod; one
-light drive one ball in does not.
-
-Measured at gain 1, standing, the tip covers **8.75 body units** in a four-second
-window - more than the driven root produced, which is the free chain doing what
-it is for. At the default zoom that is 11 px of reach on screen, about a third of
-the tail's own length: enough to be seen, not enough to read as a wagging stick.
-The sway is the only thing in the frame that moves while the animal stands.
-
-Two things learned while instrumenting it, both worth keeping:
-
-- **The free chain rings for ten seconds or more.** `drag` 0.998 is deliberate
-  - it is what makes a tail a tail - but it also means a transient from the
-  authored pose takes ~20 s to die. Any measurement of "does the tail move"
-  taken earlier measures settling, not motion: at a one-second settle the
-driver-off tail still covers 26 units. The test waits twenty seconds, after
-  which the same measurement is 0.2 units with the driver off against 6.7 with
-  it on.
-- **A driven chain can pass a damping test on its own.** The tail-liveliness
-  test (75 degrees of travel after a turn, against 20 damped like the body)
-  would report a dead tail as lively once the chain is animated, so it silences
-  the driver (`w.sway = 0`) and measures the physics alone. The sway has its own
-  test, and it compares against the same animal with the driver off rather than
-  against zero.
-
-The keys `K`/`L` and `N`/`M` adjust gain and rate live. Both values are drawn on
-the surface, under the facing reading, for four seconds after they are touched -
-`GAIN 1.25` over `RATE 0.90` - so a number can be read off the window while the
-other hand is on the keys. The window title carries the same two numbers for as
-long as the window is open, which is easier to read from a distance and survives
-the readout timing out. When the motion is settled by eye, the numbers become
-constants and the keys go, the same way the ears and then the eyes were finished.
-
-The readout needed a text path, not just a number path: the digit font had no
-letters and no decimal point, so `glyph()` grew the seven capitals that spell GAIN
-and RATE plus a full stop, and `draw_text` lays them out in the same 3x5 cells the
-digits already used. A test walks the strings the formats can actually produce and
-fails if any character would render as a blank cell - a missing glyph would
-otherwise drop a digit and the readout would quietly lie.
-
-### The lateral half
-
-The sagittal sway is invisible from the front. The solver runs in the animal's
-own plane, so the chain moves fore-and-aft - and at a heading near zero that
-points almost straight into the screen. Driving the root harder only pushes it
-further into the depth axis.
-
-A tail also sways side to side, and that part is authored per ball exactly the
-way the spine's lateral flex is (`TAIL_LATERAL` 12 body units at the tip,
-`TAIL_LATERAL_LAG` 0.45 rad per ball). Three details make it read:
-
-- **The amplitude grows down the chain**, `(i+1)/5`, so the root barely moves
-  and the tip carries the motion.
-- **It rides on the rump's own lateral flex** rather than replacing it, or the
-  joint would step sideways by the whole of the spine's flex - the same opening
-  as before, in the other axis.
-- **The phase is delayed per ball**, so the sway travels out to the tip instead
-  of shifting all five balls sideways at once - the difference between a sway
-  and a tail being slid along a rail.
-- **It is the same clock and the same gain as the sagittal half**, so neither
-  can drift out of step with the other, and one key pair tunes both.
-
-Together the two halves cover the compass: profile shows the chain's own
-fore-and-aft swing, front and back show the lateral glide, and in between they
-mix. Measured facing the camera, a two-frame diff across the sway covers 17 px of
-surface, all of it at the rear where the tail is; the rest of the body is
-pixel-identical.
-
-One thing learned the hard way, from the first live session: **SDL delivers
-auto-repeat as ordinary key-downs**. Holding `K` for a second took the gain from
-1.0 to 0.0 in five steps and the tail died, which reads exactly like "the keys
-do nothing". The tuning keys now ignore repeats, so one press is one step, and
-the value they land on is drawn on the surface.
+Two things the exercise cost, worth remembering if animation ever comes back:
+the free chain rings for ten seconds or more after a transient, so any
+measurement of the tail's motion needs a twenty-second settle before it means
+anything; and a driven chain passes tests written for a physical one, which is
+why the liveliness test used to silence its driver. The text path that drew the
+readout went with the sway - `draw_number` draws digits again.
 
 ## Next: the nose
 
