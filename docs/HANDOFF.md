@@ -15,7 +15,8 @@ Read this as orientation, not law. Refresh live state (`git status`, `git log`,
   modes.
 - **The face has a nose and a mouth.** The mouth is a *texture on the muzzle*, not
   a ball: two humps, painted the way the pupil is painted on the sclera.
-- Tree clean, `main` level with `origin/main` at `3098b63`.
+- Tree clean, `main` level with `origin/main`. (No SHA here on purpose: the commit
+  that adds this note moves it.)
 - A ragdoll may still be running from the owner's session (no dump instrument on
   it, so it cannot corrupt `/tmp/ours.ppm`). `pgrep -x ragdoll` before measuring
   anything anyway.
