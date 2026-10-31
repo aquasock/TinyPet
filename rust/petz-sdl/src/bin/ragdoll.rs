@@ -31,7 +31,10 @@ use petz_core::gait::{two_bone_ik, Gait, GaitSpec};
 use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
 use petz_core::project::{Body, Projected, Vec3 as WVec3, View};
 use petz_core::shade::{Light, Ramp, Vec3};
-use petz_core::{draw_disc, draw_disc_on_sphere, draw_flat_disc, draw_ring, DepthBuffer, Paint, Palette, SpanTable, Surface};
+use petz_core::{
+    draw_curve_on_sphere, draw_disc, draw_disc_on_sphere, draw_flat_disc, draw_ring, DepthBuffer, Paint,
+    Palette, SpanTable, Surface,
+};
 use std::fs;
 use std::path::PathBuf;
 
@@ -108,9 +111,14 @@ const TAIL_LINK: f32 = 0.12;
 /// fraction of the muzzle's radius, and it is at the snout's limit: at 0.85 the
 /// line's lower edge is on the muzzle's own rim, and further down the rim is what
 /// is clipping it, so the pixels stop changing.
-const MOUTH_WIDTH: f32 = 14.0;
+const MOUTH_WIDTH: f32 = 18.0;
 const MOUTH_THICK: f32 = 2.0;
 const MOUTH_DROP: f32 = 0.85;
+
+/// How far the mouth curls above its own line, in body units: the two humps of a
+/// cartoon cat's mouth. Positive is upwards, which is the direction with room -
+/// the marking's lower edge is already on the snout's rim.
+const MOUTH_CURL: f32 = 3.0;
 
 /// The mouth's colour: black on this palette, the same entry the retail iris
 /// uses for a pupil, and green under `PETZ_DIAG` so it can be found in a dump
@@ -576,6 +584,7 @@ struct Walker {
     /// zoom the only choices are one pixel and two.
     mouth_width: f32,
     mouth_thick: f32,
+    mouth_curl: f32,
     mouth_drop: f32,
 }
 
@@ -657,6 +666,10 @@ impl Walker {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(MOUTH_THICK),
+            mouth_curl: std::env::var("PETZ_MOUTH_CURL")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(MOUTH_CURL),
             mouth_drop: std::env::var("PETZ_MOUTH_DROP")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -999,8 +1012,8 @@ fn report_eyes(w: &Walker) {
 
 fn report_mouth(w: &Walker) {
     println!(
-        "mouth line: length {:.1}  thick {:.1}  drop {:.2}",
-        w.mouth_width, w.mouth_thick, w.mouth_drop
+        "mouth: length {:.1}  thick {:.1}  curl {:.1}  drop {:.2}",
+        w.mouth_width, w.mouth_thick, w.mouth_curl, w.mouth_drop
     );
 }
 
@@ -1008,8 +1021,8 @@ fn report_mouth(w: &Walker) {
 /// without going back to the terminal that started the app.
 fn show_mouth(canvas: &mut sdl2::render::Canvas<sdl2::video::Window>, w: &Walker) {
     let _ = canvas.window_mut().set_title(&format!(
-        "petz ragdoll sandbox - mouth length {:.1} drop {:.2}",
-        w.mouth_width, w.mouth_drop
+        "petz ragdoll sandbox - mouth length {:.1} curl {:.1} drop {:.2}",
+        w.mouth_width, w.mouth_curl, w.mouth_drop
     ));
 }
 
@@ -1199,7 +1212,7 @@ fn main() -> Result<(), String> {
          drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
          light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
          (the ear balls are frozen: no keys - see EAR_* in the source)\n\
-         mouth: K/L length, N/M height on the snout (values in the title bar)\n\
+         mouth: K/L length, H/J curl, N/M height (values in the title bar)\n\
          Shift+drag: carry the whole animal   G: constraint links\n\
          Tab: ball numbers   P: settings   R: reset   Space: pause   Esc: quit"
     );
@@ -1310,6 +1323,16 @@ fn main() -> Result<(), String> {
                     }
                     sdl2::keyboard::Keycode::L => {
                         walker.mouth_width = (walker.mouth_width + 2.0).min(30.0);
+                        report_mouth(&walker);
+                        show_mouth(&mut canvas, &walker);
+                    }
+                    sdl2::keyboard::Keycode::J => {
+                        walker.mouth_curl = (walker.mouth_curl - 0.5).min(12.0);
+                        report_mouth(&walker);
+                        show_mouth(&mut canvas, &walker);
+                    }
+                    sdl2::keyboard::Keycode::H => {
+                        walker.mouth_curl = (walker.mouth_curl + 0.5).min(12.0);
                         report_mouth(&walker);
                         show_mouth(&mut canvas, &walker);
                     }
@@ -1749,21 +1772,39 @@ fn main() -> Result<(), String> {
                         (fx - cx0).powi(2) + (fy - cy0).powi(2) <= re0 * re0
                     }
                 };
-                // A line is a disc with everything but one band of rows
-                // clipped away: the disc gives the length (its middle rows are
-                // its widest) and the band gives the thickness, so the line is
-                // painted with the same per-pixel sphere depth a disc gets and
-                // lies on the snout instead of across it.
-                let len = (walker.mouth_width * zoom).round().max(1.0) as i32;
-                let thick = (walker.mouth_thick * zoom).round().max(1.0) as i32;
-                let ly = (cy + oy) as i32;
-                let (lo, hi) = (ly - (thick - 1) / 2, ly + thick / 2);
-                let band = move |x: i32, y: i32| -> bool { inside(x, y) && y >= lo && y <= hi };
-                draw_disc_on_sphere(
-                    &mut surface, &mut depth, &table,
-                    (cx + ox) as i32, ly,
-                    len as usize,
-                    cx, cy, re, de, MOUTH_BIAS, mouth_col, &band,
+                // The mouth is a curve, so it is drawn a column at a time
+                // rather than as a disc with rows clipped away - a disc's span
+                // narrows at its top and bottom, which would cut the curve off
+                // exactly where it leaves the middle. Two humps out of the
+                // marking's own line, returning to it at both ends: the shape of
+                // a cat's mouth drawn in three strokes.
+                let half = (walker.mouth_width * zoom / 2.0).max(1.0);
+                let amp = walker.mouth_curl * zoom;
+                let thick = (walker.mouth_thick * zoom).round().max(1.0);
+                let my = cy + oy;
+                // Sampled outwards from the mouth's own column so the two halves
+                // are mirror images. Measured from the projected centre the
+                // columns straddle it by half a pixel, and one end of the curve
+                // comes out a row lower than the other.
+                //
+                // The curve is built upwards from the marking's line, because
+                // that line's lower edge is already on the snout's rim: two
+                // humps either side of the middle, returning to the line at the
+                // ends. The ends fall outside the muzzle's circle at that height
+                // and are clipped away, which is what leaves two arcs.
+                // The column whose centre is nearest the projected centre: the
+                // rasterizer works in pixel centres, at half-pixel offsets.
+                let mid = (cx + ox - 0.5).round() as i32;
+                let reach = half.round() as i32;
+                let curve = move |x: i32| -> f32 {
+                    let u = ((x - mid) as f32 / half).clamp(-1.0, 1.0);
+                    my - amp * (std::f32::consts::PI * u).sin().abs()
+                };
+                draw_curve_on_sphere(
+                    &mut surface, &mut depth,
+                    mid - reach, mid + reach,
+                    &curve, thick / 2.0,
+                    cx, cy, re, de, MOUTH_BIAS, mouth_col, &inside,
                 );
             }
         }

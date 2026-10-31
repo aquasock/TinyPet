@@ -30,16 +30,19 @@ at the owner's request. The tail is physics only: it trails the rump, and hangs
 when the animal stands. The readout's text path went with it. `docs/SANDBOX.md`
 has the numbers and the reasons, so it need not be rebuilt blind.
 
-**The mouth, a thin line.** A black line painted onto the muzzle's own sphere with
-the same primitive as the pupil: a disc with everything but one band of rows
-clipped away, so the length comes from the disc and the thickness from the band,
-and the marking takes the sphere's depth per pixel rather than being drawn across
-it. `MOUTH_WIDTH` 14 body units (7 px), `MOUTH_THICK` 2 (1 px), `MOUTH_DROP` 0.85 -
-the snout's limit, settled by eye. `K`/`L` lengthen it and `N`/`M` move it while it
-is being judged. Facing the camera it is 7 px; in profile 3; facing away, culled.
-Three faults fixed on the way, all about the reference sphere having to match the
-drawn ball exactly, or the cull needing a tolerance at exactly side-on - see
-`docs/SANDBOX.md`.
+**The mouth, a curve.** Two humps painted onto the muzzle's own sphere - a
+texture, not a ball - with a new core primitive, `draw_curve_on_sphere`, that walks
+columns so the shape is the caller's and the depth is still the sphere's per
+pixel. `MOUTH_WIDTH` 18 body units (9 px), `MOUTH_THICK` 2 (1 px), `MOUTH_CURL` 6
+(3 px of rise), `MOUTH_DROP` 0.85 - the snout's limit. `K`/`L` lengthen it, `H`/`J`
+curl it, `N`/`M` move it, all live. Facing the camera it is 9-10 px; in profile 5;
+facing away, culled. Four faults fixed getting there, all recorded in
+`docs/SANDBOX.md` - every one of them about a reference sphere, a stroke row, or a
+sample column disagreeing with what the rasterizer actually drew.
+
+The snout caps it: 7 px radius on screen means 7.5 px of width at the mouth's
+height, and the humps already meet the nose. A bigger cartoon mouth needs a bigger
+muzzle, which is a change to the body.
 
 Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 

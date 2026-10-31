@@ -199,6 +199,60 @@ pub fn draw_disc_on_sphere(
     }
 }
 
+/// Draw a curve on another sphere: one column at a time, the row given by
+/// `row_at`, the depth from the reference sphere's surface.
+///
+/// A mouth bends, so it cannot be a disc with rows clipped away: a disc's span
+/// narrows towards its top and bottom, which would cut the curve off exactly
+/// where it leaves the middle. This walks columns instead, so the shape is
+/// entirely the caller's and the pixels still sit on the sphere rather than on
+/// a plane in front of it.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_curve_on_sphere(
+    surface: &mut Surface,
+    depth: &mut DepthBuffer,
+    x0: i32,
+    x1: i32,
+    row_at: &dyn Fn(i32) -> f32,
+    half_thickness: f32,
+    ref_cx: f32,
+    ref_cy: f32,
+    ref_r: f32,
+    ref_depth: f32,
+    bias: f32,
+    colour: u8,
+    keep: &dyn Fn(i32, i32) -> bool,
+) {
+    let (h, w) = (surface.height(), surface.width());
+    let rr = ref_r * ref_r;
+    for x in x0..=x1 {
+        if x < 0 || x as usize >= w {
+            continue;
+        }
+        let centre = row_at(x);
+        // Rows are picked by count rather than by a distance test: a curve that
+        // lands exactly on a pixel boundary satisfies "within half a pixel" for
+        // two rows, and one that lands on a pixel centre satisfies it for none
+        // under a strict test. Counting rows from the nearest one is the same
+        // answer every time - one row for a one-pixel line, two for a two-pixel
+        // one - which is what a caller drawing a stroke wants.
+        let want = ((half_thickness * 2.0).round() as i32).max(1);
+        let nearest = (centre - 0.5).round() as i32;
+        let first = nearest - (want - 1) / 2;
+        for y in first..first + want {
+            if y < 0 || y as usize >= h || !keep(x, y) {
+                continue;
+            }
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            let dr = (fx - ref_cx).powi(2) + (fy - ref_cy).powi(2);
+            let nz = (1.0 - dr / rr).max(0.0).sqrt();
+            if depth.test_and_set(x as usize, y as usize, ref_depth - nz * ref_r + bias) {
+                surface.set(x as usize, y as usize, colour);
+            }
+        }
+    }
+}
+
 /// A flat disc at a single depth. Used for rims: a backing plate just behind
 /// the ball, rather than a second sphere, because a sphere of a larger radius is
 /// *nearer* at the centre and at the rim alike and ends up winning everywhere.
@@ -367,5 +421,40 @@ mod tests {
         draw_disc(&mut s, &mut d, &table, 32, 32, 40, 0.0, 0.0, Paint::Flat(1), &|_, _| true);
         draw_disc(&mut s, &mut d, &table, 36, 32, 10, 0.0, 0.0, Paint::Flat(2), &|_, _| true);
         assert_eq!(s.get(36, 32).unwrap(), 1, "the inner ball must not show");
+    }
+
+    #[test]
+    fn a_curve_takes_its_depth_from_the_sphere_it_sits_on() {
+        // The mouth's primitive: one pixel per column, at the row the caller
+        // asks for, with the depth solved from the sphere underneath. The depth
+        // is what makes it lie on the snout instead of on a plane in front of it.
+        let mut s = Surface::new(32, 32);
+        let mut d = DepthBuffer::new(32, 32);
+        let curve = |x: i32| -> f32 { 16.0 + (x as f32 - 16.0).abs() * -0.5 };
+        draw_curve_on_sphere(
+            &mut s, &mut d, 10, 22, &curve, 0.5, 16.0, 16.0, 12.0, -100.0, -1.0, 7,
+            &|_, _| true,
+        );
+        for x in 10..=22 {
+            let want = curve(x).round() as i32;
+            let got: Vec<i32> =
+                (0..32usize).filter(|&y| s.get(x as usize, y) == Some(7)).map(|y| y as i32).collect();
+            assert_eq!(got.len(), 1, "column {x} painted {got:?}");
+            assert!((got[0] - want).abs() <= 1, "column {x}: {got:?} vs row {want}");
+        }
+        // The middle of the curve is the nearest part of it.
+        assert!(d.get(16, 16) < d.get(10, 19), "the curve is flat in depth");
+    }
+
+    #[test]
+    fn a_curve_is_clipped_by_whatever_the_caller_keeps() {
+        let mut s = Surface::new(32, 32);
+        let mut d = DepthBuffer::new(32, 32);
+        draw_curve_on_sphere(
+            &mut s, &mut d, 4, 28, &|_| 16.0, 0.5, 16.0, 16.0, 12.0, -100.0, -1.0, 7,
+            &|x, _| x < 16,
+        );
+        assert_eq!(s.get(15, 16), Some(7));
+        assert_ne!(s.get(16, 16), Some(7), "the keep closure did not clip");
     }
 }

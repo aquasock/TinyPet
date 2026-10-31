@@ -49,8 +49,8 @@ draw every constraint as a line, **`W`/`S` forward and back**, **`A`/`D` turn le
 (hold, not toggle; `Q`/`E` are the same), `+`/`-` speed, `V` view pitch, arrows
 move the light, `Z`/`X` ambience, `[`/`]` ramp steps, `T` texture, `,`/`.` spine
 flex, `Tab` ball numbers, `P` print settings, `R` reset, `Space` pause, `Esc`
-quit. `K`/`L` lengthen the mouth and `N`/`M` move it up and down the snout; the
-values are in the title bar while they are being judged.
+quit. `K`/`L` lengthen the mouth, `H`/`J` change its curl and `N`/`M` move it up
+and down the snout; the values are in the title bar while they are being judged.
 
 The **ear balls** have no live controls either. They were tuned from the
 keyboard - four pairs, `B` switching between the bases and the tips - and the
@@ -124,9 +124,10 @@ is asserted as a regression test.
   ear at this fidelity but cannot flop. See "The ears" below.
 - **The ear tip is a cap, not a flop.** It follows the base rigidly because it
   is pinned with it. Nothing here gives an ear its own swing.
-- **The mouth is a straight line.** A thin black line painted on the muzzle's
-  sphere, in the right place and clipped by the snout. It does not curve, and it
-  has no expression: no tongue, no open or closed state.
+- **The mouth is a small curve.** Two humps painted on the muzzle's sphere, in
+  the right place and clipped by the snout. At this size it is 9 px wide and 3 px
+  deep, and cannot be much more: the muzzle is 7 px in radius on screen. No
+  expression yet - no tongue, no open or closed state.
 - **Eyelids are removed.** Petz has no lid geometry — it parameterises one with
   `[Eyelid Color]` plus per-eye "eyelid height" and "eyelid tilt". Our lid-ball
   approximation was visible above the eye and read as a small ear.
@@ -413,40 +414,48 @@ thing to check against a capture.
 
 ## The mouth
 
-Asked for as "like the iris of the eye: a texture mapped to the snout" - first a
-small black circle, then a thin line. Either way it is a texture, not a ball:
-painted onto the muzzle's own sphere with `draw_disc_on_sphere`, the primitive the
-pupil already uses. Its depth is solved from that sphere, so it lies *on* the
-snout rather than sinking into it or floating over it, and the muzzle's own circle
-clips it, so it goes round the side instead of hanging off the edge.
+Asked for as "like the iris of the eye: a texture mapped to the snout" - a small
+black circle first, then a thin line, now a curve. It is a texture in every
+version, not a ball: painted onto the muzzle's own sphere, so its depth is that
+sphere's surface per pixel and the muzzle's own circle clips it. The marking lies
+*on* the snout instead of sinking into it or floating over it.
 
-The line is a disc with everything but one band of rows clipped away: the disc
-gives the length, because its middle rows are its widest, and the band gives the
-thickness. That way the line is painted with the same per-pixel sphere depth a
-disc gets, so it curves over the snout instead of being drawn across it.
+A straight line could be a disc with everything but one band of rows clipped away.
+A curve cannot: a disc's span narrows towards its top and bottom, so the clipping
+would cut the curve off exactly where it leaves the middle. So the renderer grew
+one primitive, `draw_curve_on_sphere`, which walks columns, takes the row from the
+caller, and solves the depth from the reference sphere per pixel.
 
 ```
-MOUTH_WIDTH  14.0   body units; a 7 px line at the default zoom
+MOUTH_WIDTH  18.0   body units; 9 px at the default zoom
 MOUTH_THICK   2.0   body units; one pixel
+MOUTH_CURL    6.0   body units; the humps rise 3 px above the line
 MOUTH_DROP    0.85  below the muzzle's centre, as a fraction of its radius
 MOUTH_BIAS   -0.9   world units in front of the snout's surface
 ```
 
+The curve is two humps out of the marking's own line, returning to it at both
+ends: `y = line - curl * |sin(pi * u)|`. It is built *upwards* from the line
+because that line's lower edge is already on the snout's rim; the ends fall
+outside the muzzle's circle at that height and the rim clips them, which is what
+leaves two arcs rather than a wave.
+
 Placement is a direction in body space - forward, and `MOUTH_DROP` below the
-sphere's centre - projected the way the pupil's is. Facing the camera the line
-sits under the middle of the muzzle. In profile it has slid to the front rim and
-the snout clips it to a stub. Facing away it is culled, and the cull is not an
-optimisation: a disc drawn on a sphere takes that sphere's *near* surface for its
-depth, so a marking pointing away from the viewer would paint straight through the
-snout and appear on the back of the head. Exactly side-on, `cos(heading)` is a
-rounding error either side of zero, so the cull carries a tolerance; without it
-the mouth showed facing one way and disappeared facing the other.
+sphere's centre - projected the way the pupil's is. Facing the camera the mouth
+sits under the middle of the muzzle with its centre hanging lowest. In profile it
+has slid to the front rim and the snout clips it to a stub. Facing away it is
+culled, and the cull is not an optimisation: a disc drawn on a sphere takes that
+sphere's *near* surface for its depth, so a marking pointing away from the viewer
+would paint straight through the snout.
 
-The drop is at the snout's limit: at 0.85 the line's lower edge is on the muzzle's
-own rim, and past that the rim is what clips it, so the pixels stop changing. The
-height was settled by eye at this value.
+**The snout is the limit.** The muzzle is 13 body units in radius - 7 px on screen
+- and at the height of the mouth its circle is only 7.5 px wide, with the nose
+taking the middle 5 units above it. A two-hump curve is legible here at 9 px wide
+and 3 px of rise, and not much beyond that: the humps already meet the nose's
+lower corners, and a wider mouth runs into the rim. A genuinely big cartoon mouth
+needs a bigger muzzle, which is a change to the body, not to the marking.
 
-Two faults it took to get from "draws nothing" to "draws at all", both worth
+Three faults it took to get from "draws nothing" to "draws at all", all worth
 keeping:
 
 - **The reference sphere must be the one the ball was actually drawn from.** The
@@ -457,15 +466,24 @@ keeping:
 - **The radius must be rounded the same way.** The muzzle is 6.5 px before
   rounding and 7 as drawn; using 6.5 as the reference disagreed with the drawn
   ball in the same way. Both now round identically, and the bias alone decides.
+- **A stroke's rows are picked by count, not by distance.** A curve that lands on
+  a pixel boundary is "within half a pixel" of two rows, and one that lands on a
+  pixel centre is within half a pixel of none under a strict test. Counting rows
+  outwards from the nearest one gives one row for a one-pixel stroke every time.
 
-Measured under `PETZ_DIAG`, where the mouth paints green: 7 px across facing the
-camera, 7 at 165 degrees, 5 at 150, 4 at 135, 3 at 120 and 3 in profile either
-way, none facing away. `K`/`L` lengthen it, `N`/`M` move it, `P` and the title bar
-report both, and `PETZ_MOUTH` / `PETZ_MOUTH_THICK` / `PETZ_MOUTH_DROP` do the same
-headlessly for a sweep.
+And one about sampling: the curve is laid out from the column whose centre is
+nearest the mouth's own centre, at half-pixel offsets. Measured from the
+projected centre instead, the columns straddle it and one end of the curve comes
+out a row lower than the other.
 
-What it is not, yet: a mouth. A straight line in the right place - no curve, and
-no expression on top of it (no tongue, no open or closed state).
+Measured under `PETZ_DIAG`, where the mouth paints green: 9-10 px across facing
+the camera, 8 at 135 degrees, 5 at 120 and in profile either way, none facing
+away. `K`/`L` lengthen it, `H`/`J` change the curl, `N`/`M` move it, `P` and the
+title bar report all three, and `PETZ_MOUTH` / `PETZ_MOUTH_CURL` /
+`PETZ_MOUTH_DROP` do the same headlessly for a sweep.
+
+What it is not, yet: expression. The shape is a mouth; the tongue and the eyelid
+states are the rest of the face work.
 
 ## Reference findings worth keeping
 
