@@ -18,10 +18,16 @@ Read this as orientation, not law. Refresh live state (`git status`, `git log`,
 
 **The tail's idle sway.** The root is driven round a slow oval
 (`TAIL_SWAY_X/Y/RATE`, plus one swing per stride while walking) instead of being
-held at a fixed point, and the free chain behind it carries the motion. `K`/`L`
-scale it and `N`/`M` speed it up while it is being judged. Measured at gain 1:
-the tip covers 6.7 body units in four seconds, 11 px of screen reach; a two-frame
-diff while standing changes 232 pixels and 231 of them are in the tail's corner.
+held at a fixed point, and the free chain behind it carries the motion. There is
+also a lateral glide down the chain (`TAIL_LATERAL`, `TAIL_LATERAL_LAG`), because
+the solver is sagittal and the fore-and-aft sway is edge-on when the animal faces
+the camera. `K`/`L` scale it and `N`/`M` speed it up while it is being judged,
+and the title bar shows the values. Measured at gain 1: the tip covers 6.7 body
+units in four seconds, 11 px of screen reach in profile, 17 px of diff at the
+rear facing the camera; a two-frame diff while standing changes 232 pixels and
+231 of them are in the tail's corner. Tuning keys ignore auto-repeat now: holding
+`K` used to walk the gain to zero in five steps, which read as "the keys do
+nothing".
 `the_tail_sways_when_the_animal_stands_still` waits 20 s before measuring,
 because the chain rings for ten, and the older liveliness test silences the
 driver so it still measures the physics.
@@ -39,10 +45,10 @@ Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 
 ## Verified, and how
 
-- `cargo test --workspace`: 67 tests green (39 core, 2 silhouette, 26 in the
+- `cargo test --workspace`: 68 tests green (39 core, 2 silhouette, 27 in the
   sandbox binary). The counts test expects 48 balls, 11 on the head, sixteen
   claws, five tail balls. The previous handoff said 68 and "2 misc"; there is no
-  such pair - 67 is what actually runs.
+  such pair.
 - Tail liveliness, measured as degrees of travel after a turn ends: 75 with the
   tail's own damping against 20 damped like the body.
 - Hips, measured against a rigid body through a full-rate turn: 0.2-1.1 px, and

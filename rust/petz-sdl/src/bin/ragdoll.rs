@@ -113,6 +113,18 @@ const TAIL_SWAY_RATE: f32 = 0.9;
 /// answers the legs instead of only the clock.
 const TAIL_GAIT_X: f32 = 5.0;
 
+/// The lateral half of the sway: how far the *tip* is carried side to side, in
+/// body units, and how much phase each ball down the chain loses.
+///
+/// The solver runs in the animal's own sagittal plane, so the chain's own motion
+/// is fore-and-aft - which at a heading near zero points almost straight into
+/// the screen, and the tail looks still however hard the root is driven. A tail
+/// also sways side to side. That part is authored, per ball, the same way the
+/// spine's lateral flex is; the growing amplitude and the delay down the chain
+/// are what make it travel instead of sliding the whole tail sideways at once.
+const TAIL_LATERAL: f32 = 12.0;
+const TAIL_LATERAL_LAG: f32 = 0.45;
+
 /// The claw ball's radius. Small enough that four of them across a foot's toe
 /// are separate dots at 320x240 rather than one blob.
 const CLAW_RADIUS: f32 = 2.0;
@@ -799,6 +811,7 @@ impl Walker {
         // like a chain and can swing right round the root. Left unanimated that
         // looks like a broken tail; what it needs is motion, not a shape.
         const ROOT_LIFT: f32 = 13.0;
+        let t = self.clock;
         if let Some(&root) = creature.tail.first() {
             // The root is held, not nailed down: it traces a slow oval behind
             // the rump and carries the chain with it. Left at a fixed point the
@@ -807,7 +820,6 @@ impl Walker {
             //
             // Two rates, the second twice the first and out of phase, so the
             // path is an oval rather than a line traced back and forth.
-            let t = self.clock;
             let sway_x = (t * self.sway_rate).sin();
             let sway_y = (t * self.sway_rate * 2.0 + 0.6).sin();
             // Walking adds one swing per stride, in phase with the legs, on top
@@ -822,6 +834,20 @@ impl Walker {
                 GROUND - 68.0 - ROOT_LIFT + lift - self.sway * TAIL_SWAY_Y * sway_y,
             );
             doll.drive_to(root, home, 0.25);
+        }
+
+        // The side-to-side half, which is what reads when the animal faces the
+        // camera. Authored per ball with a delay down the chain, so the sway
+        // travels to the tip instead of the tail shifting as one piece.
+        {
+            let n = creature.tail.len().max(1) as f32;
+            for (i, &ball) in creature.tail.iter().enumerate() {
+                let reach = (i as f32 + 1.0) / n;
+                let phase = t * self.sway_rate - i as f32 * TAIL_LATERAL_LAG;
+                if let Some(p) = doll.particles.get_mut(ball) {
+                    p.side = self.sway * TAIL_LATERAL * reach * phase.sin();
+                }
+            }
         }
 
         for (i, leg) in creature.legs.iter().enumerate() {
@@ -951,8 +977,16 @@ fn report_ears() {
     );
 }
 
-fn report_tail(w: &Walker) {
-    println!(
+/// Put the live tuning numbers in the window title, where they can be read
+/// without going back to the terminal that started the app.
+fn show_sway(canvas: &mut sdl2::render::Canvas<sdl2::video::Window>, w: &Walker) {
+    let _ = canvas.window_mut().set_title(&format!(
+        "petz ragdoll sandbox - sway {:.2} x {:.2} rad/s",
+        w.sway, w.sway_rate
+    ));
+}
+
+fn report_tail(w: &Walker) {    println!(
         "tail sway: gain {:.2}  rate {:.2} rad/s  ({:.1} s a sway)  reach x {:.0} y {:.0} at gain 1",
         w.sway,
         w.sway_rate,
@@ -962,8 +996,7 @@ fn report_tail(w: &Walker) {
     );
 }
 
-fn report(light: Light, steps: usize, tex: usize, texture: &str) {
-    let yaw = light.dir.x.atan2(light.dir.z).to_degrees();
+fn report(light: Light, steps: usize, tex: usize, texture: &str) {    let yaw = light.dir.x.atan2(light.dir.z).to_degrees();
     let pitch = light.dir.y.asin().to_degrees();
     println!(
         "settings: steps={steps} yaw={yaw:.1} pitch={pitch:.1} ambient={:.2} diffuse={:.2} tex={tex} ({texture})",
@@ -1139,6 +1172,7 @@ fn main() -> Result<(), String> {
          drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
          light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
          (the ear balls are frozen: no keys - see EAR_* in the source)\n\
+         tail sway: K/L reach, N/M rate (shown in the title bar)\n\
          Shift+drag: carry the whole animal   G: constraint links\n\
          Tab: ball numbers   P: settings   R: reset   Space: pause   Esc: quit"
     );
@@ -1148,7 +1182,7 @@ fn main() -> Result<(), String> {
         for e in events.poll_iter() {
             match e {
                 sdl2::event::Event::Quit { .. } => break 'outer,
-                sdl2::event::Event::KeyDown { keycode: Some(k), .. } => {
+                sdl2::event::Event::KeyDown { keycode: Some(k), repeat: false, .. } => {
                     held.insert(k);
                     match k {
                     sdl2::keyboard::Keycode::Escape => break 'outer,
@@ -1245,18 +1279,22 @@ fn main() -> Result<(), String> {
                     sdl2::keyboard::Keycode::K => {
                         walker.sway = (walker.sway - 0.25).max(0.0);
                         report_tail(&walker);
+                        show_sway(&mut canvas, &walker);
                     }
                     sdl2::keyboard::Keycode::L => {
                         walker.sway = (walker.sway + 0.25).min(3.0);
                         report_tail(&walker);
+                        show_sway(&mut canvas, &walker);
                     }
                     sdl2::keyboard::Keycode::N => {
                         walker.sway_rate = (walker.sway_rate - 0.15).max(0.15);
                         report_tail(&walker);
+                        show_sway(&mut canvas, &walker);
                     }
                     sdl2::keyboard::Keycode::M => {
                         walker.sway_rate = (walker.sway_rate + 0.15).min(2.5);
                         report_tail(&walker);
+                        show_sway(&mut canvas, &walker);
                     }
                     // Height as an angle round the head's centre, not an offset
                     // from the ground: raising an ear walks it up the sphere,
@@ -2641,6 +2679,48 @@ mod walk_tests {
         assert!(
             moving > 4.0,
             "the tail barely moves with the driver on: {moving:.2} units in four seconds"
+        );
+    }
+
+    #[test]
+    fn the_tail_sways_sideways_where_the_fore_and_aft_motion_is_edge_on() {
+        // Facing the camera, the chain's own motion points straight into the
+        // screen: the sagittal sway is edge-on and the tail looks still however
+        // hard its root is driven. The lateral half is authored per ball, with a
+        // delay down the chain - which is also what makes it read as a swing
+        // rather than the whole tail being shifted sideways in one piece.
+        let (mut doll, c, rest, mut w) = rig();
+        let dt = 1.0 / 120.0;
+        let mut run = |w: &mut Walker, doll: &mut Ragdoll, n: usize| {
+            for _ in 0..n {
+                w.advance(dt, 0.0, 0.0);
+                w.pose(doll, &c, &rest);
+                doll.step(dt);
+            }
+        };
+        w.sway = 0.0;
+        run(&mut w, &mut doll, 240);
+        for &i in &c.tail {
+            assert!(
+                doll.particles[i].side.abs() < 1e-6,
+                "ball {i} sits off the centre line with the sway switched off"
+            );
+        }
+        w.sway = 1.0;
+        let mut peak = vec![0.0f32; c.tail.len()];
+        for _ in 0..300 {
+            w.advance(dt, 0.0, 0.0);
+            w.pose(&mut doll, &c, &rest);
+            doll.step(dt);
+            for (k, &b) in c.tail.iter().enumerate() {
+                peak[k] = peak[k].max(doll.particles[b].side.abs());
+            }
+        }
+        let tip = peak[peak.len() - 1];
+        assert!(tip > 6.0, "the tip barely moves sideways: {tip:.2} units");
+        assert!(
+            tip > 2.0 * peak[0],
+            "the swing does not grow toward the tip: {peak:?}"
         );
     }
 }

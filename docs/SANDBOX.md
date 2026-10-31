@@ -400,9 +400,41 @@ driver-off tail still covers 26 units. The test waits twenty seconds, after
   test, and it compares against the same animal with the driver off rather than
   against zero.
 
-The keys `K`/`L` and `N`/`M` adjust gain and rate live. When the motion is
-settled by eye, the numbers become constants and the keys go, the same way the
-ears and then the eyes were finished.
+The keys `K`/`L` and `N`/`M` adjust gain and rate live, and the window title
+shows what they are set to. When the motion is settled by eye, the numbers
+become constants and the keys go, the same way the ears and then the eyes were
+finished.
+
+### The lateral half
+
+The sagittal sway is invisible from the front. The solver runs in the animal's
+own plane, so the chain moves fore-and-aft - and at a heading near zero that
+points almost straight into the screen. Driving the root harder only pushes it
+further into the depth axis.
+
+A tail also sways side to side, and that part is authored per ball exactly the
+way the spine's lateral flex is (`TAIL_LATERAL` 12 body units at the tip,
+`TAIL_LATERAL_LAG` 0.45 rad per ball). Three details make it read:
+
+- **The amplitude grows down the chain**, `(i+1)/5`, so the root stays on the
+  centre line and the tip carries the motion.
+- **The phase is delayed per ball**, so the sway travels out to the tip instead
+  of shifting all five balls sideways at once - the difference between a sway
+  and a tail being slid along a rail.
+- **It is the same clock and the same gain as the sagittal half**, so neither
+  can drift out of step with the other, and one key pair tunes both.
+
+Together the two halves cover the compass: profile shows the chain's own
+fore-and-aft swing, front and back show the lateral glide, and in between they
+mix. Measured facing the camera, a two-frame diff across the sway covers 17 px of
+surface, all of it at the rear where the tail is; the rest of the body is
+pixel-identical.
+
+One thing learned the hard way, from the first live session: **SDL delivers
+auto-repeat as ordinary key-downs**. Holding `K` for a second took the gain from
+1.0 to 0.0 in five steps and the tail died, which reads exactly like "the keys
+do nothing". The tuning keys now ignore repeats, so one press is one step, and
+the value they land on is in the title bar.
 
 ## Next: the nose
 
