@@ -400,10 +400,20 @@ driver-off tail still covers 26 units. The test waits twenty seconds, after
   test, and it compares against the same animal with the driver off rather than
   against zero.
 
-The keys `K`/`L` and `N`/`M` adjust gain and rate live, and the window title
-shows what they are set to. When the motion is settled by eye, the numbers
-become constants and the keys go, the same way the ears and then the eyes were
-finished.
+The keys `K`/`L` and `N`/`M` adjust gain and rate live. Both values are drawn on
+the surface, under the facing reading, for four seconds after they are touched -
+`GAIN 1.25` over `RATE 0.90` - so a number can be read off the window while the
+other hand is on the keys. The window title carries the same two numbers for as
+long as the window is open, which is easier to read from a distance and survives
+the readout timing out. When the motion is settled by eye, the numbers become
+constants and the keys go, the same way the ears and then the eyes were finished.
+
+The readout needed a text path, not just a number path: the digit font had no
+letters and no decimal point, so `glyph()` grew the seven capitals that spell GAIN
+and RATE plus a full stop, and `draw_text` lays them out in the same 3x5 cells the
+digits already used. A test walks the strings the formats can actually produce and
+fails if any character would render as a blank cell - a missing glyph would
+otherwise drop a digit and the readout would quietly lie.
 
 ### The lateral half
 
@@ -434,7 +444,7 @@ One thing learned the hard way, from the first live session: **SDL delivers
 auto-repeat as ordinary key-downs**. Holding `K` for a second took the gain from
 1.0 to 0.0 in five steps and the tail died, which reads exactly like "the keys
 do nothing". The tuning keys now ignore repeats, so one press is one step, and
-the value they land on is in the title bar.
+the value they land on is drawn on the surface.
 
 ## Next: the nose
 

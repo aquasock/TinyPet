@@ -109,6 +109,10 @@ const TAIL_SWAY_X: f32 = 6.0;
 const TAIL_SWAY_Y: f32 = 4.0;
 const TAIL_SWAY_RATE: f32 = 0.9;
 
+/// How long the on-screen readout of the tail's values stays up after a key
+/// moves one of them. Long enough to press a key and then read it.
+const READOUT_SECS: f32 = 4.0;
+
 /// One extra swing per stride, in the same units as `TAIL_SWAY_X`, so the tail
 /// answers the legs instead of only the clock.
 const TAIL_GAIT_X: f32 = 5.0;
@@ -175,24 +179,49 @@ const DIGITS: [[u8; 5]; 10] = [
     [0b111, 0b101, 0b111, 0b001, 0b111],
 ];
 
-/// Draw a non-negative integer in window coordinates.
-fn draw_number(
+/// One 3x5 glyph, in the same cell as the digits. This is not a font - it is
+/// the handful of capitals the on-screen readouts have to spell, plus a full
+/// stop so a value can be written the way it is printed.
+fn glyph(ch: char) -> Option<[u8; 5]> {
+    Some(match ch {
+        '0'..='9' => DIGITS[ch.to_digit(10)? as usize],
+        'A' => [0b010, 0b101, 0b111, 0b101, 0b101],
+        'E' => [0b111, 0b100, 0b111, 0b100, 0b111],
+        'G' => [0b111, 0b100, 0b101, 0b101, 0b111],
+        'I' => [0b111, 0b010, 0b010, 0b010, 0b111],
+        'N' => [0b101, 0b111, 0b101, 0b101, 0b101],
+        'R' => [0b110, 0b101, 0b110, 0b101, 0b101],
+        'T' => [0b111, 0b010, 0b010, 0b010, 0b010],
+        '.' => [0b000, 0b000, 0b000, 0b000, 0b010],
+        _ => return None,
+    })
+}
+
+/// Draw a short string in window coordinates. Every glyph takes a 3x5 cell plus
+/// one pixel of gap whether it uses the width or not, so columns line up without
+/// any measuring: a fixed decimal place is fixed because the format writes the
+/// same number of characters every time.
+fn draw_text(
     canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
     x: i32,
     y: i32,
     scale: i32,
-    value: i32,
+    text: &str,
 ) {
-    let text = value.max(0).to_string();
-    let width = text.len() as i32 * 4 * scale;
+    let cells = text.chars().count() as i32;
     let _ = canvas.set_draw_color(Color::RGB(0, 0, 0));
-    let _ = canvas.fill_rect(Rect::new(x - 5, y - 5, (width + 9) as u32, (5 * scale + 9) as u32));
+    let _ = canvas.fill_rect(Rect::new(
+        x - 5,
+        y - 5,
+        (cells * 4 * scale + 9) as u32,
+        (5 * scale + 9) as u32,
+    ));
     let _ = canvas.set_draw_color(Color::RGB(255, 255, 255));
     for (i, ch) in text.chars().enumerate() {
-        let d = ch.to_digit(10).unwrap_or(0) as usize;
-        for (row, bits) in DIGITS[d].iter().enumerate() {
+        let Some(bits) = glyph(ch) else { continue };
+        for (row, line) in bits.iter().enumerate() {
             for col in 0..3 {
-                if bits & (1 << (2 - col)) != 0 {
+                if line & (1 << (2 - col)) != 0 {
                     let _ = canvas.fill_rect(Rect::new(
                         x + i as i32 * 4 * scale + col * scale,
                         y + row as i32 * scale,
@@ -203,6 +232,17 @@ fn draw_number(
             }
         }
     }
+}
+
+/// Draw a non-negative integer in window coordinates.
+fn draw_number(
+    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
+    x: i32,
+    y: i32,
+    scale: i32,
+    value: i32,
+) {
+    draw_text(canvas, x, y, scale, &value.max(0).to_string());
 }
 
 fn repo_root() -> PathBuf {
@@ -1153,6 +1193,8 @@ fn main() -> Result<(), String> {
     let mut depth = DepthBuffer::new(W, H);
     // Ball numbers, for referring to them. Tab toggles.
     let mut show_ids = true;
+    // Seconds left to show the tail's tuning values after a key moved them.
+    let mut sway_readout = 0.0f32;
     // Diagnostics: red outlines under PETZ_DIAG, so the ear ordering shows up.
     let outline = if std::env::var("PETZ_DIAG").is_ok() { DIAG_OUTLINE } else { OUTLINE };
 
@@ -1172,7 +1214,7 @@ fn main() -> Result<(), String> {
          drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
          light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
          (the ear balls are frozen: no keys - see EAR_* in the source)\n\
-         tail sway: K/L reach, N/M rate (shown in the title bar)\n\
+         tail sway: K/L reach, N/M rate (values appear under the facing)\n\
          Shift+drag: carry the whole animal   G: constraint links\n\
          Tab: ball numbers   P: settings   R: reset   Space: pause   Esc: quit"
     );
@@ -1278,21 +1320,25 @@ fn main() -> Result<(), String> {
                     // in `Walker::new` and these keys go.
                     sdl2::keyboard::Keycode::K => {
                         walker.sway = (walker.sway - 0.25).max(0.0);
+                        sway_readout = READOUT_SECS;
                         report_tail(&walker);
                         show_sway(&mut canvas, &walker);
                     }
                     sdl2::keyboard::Keycode::L => {
                         walker.sway = (walker.sway + 0.25).min(3.0);
+                        sway_readout = READOUT_SECS;
                         report_tail(&walker);
                         show_sway(&mut canvas, &walker);
                     }
                     sdl2::keyboard::Keycode::N => {
                         walker.sway_rate = (walker.sway_rate - 0.15).max(0.15);
+                        sway_readout = READOUT_SECS;
                         report_tail(&walker);
                         show_sway(&mut canvas, &walker);
                     }
                     sdl2::keyboard::Keycode::M => {
                         walker.sway_rate = (walker.sway_rate + 0.15).min(2.5);
+                        sway_readout = READOUT_SECS;
                         report_tail(&walker);
                         show_sway(&mut canvas, &walker);
                     }
@@ -1441,6 +1487,7 @@ fn main() -> Result<(), String> {
         let now = Instant::now();
         let frame_dt = (now - last).as_secs_f32().min(0.1);
         acc += frame_dt as f64;
+        sway_readout = (sway_readout - frame_dt).max(0.0);
         last = now;
 
         // Instrument: rotate steadily and stand still, so a sweep can be read
@@ -1737,6 +1784,14 @@ fn main() -> Result<(), String> {
         // to the right, 180 is towards the viewer, 270 to the left.
         let facing = walker.heading_body.to_degrees().rem_euclid(360.0).round() as i32;
         draw_number(&mut canvas, 18, 18, 4, facing);
+
+        // The tail's two live values, under the facing, for a few seconds after
+        // they are touched - long enough to read a number off the window while
+        // pressing a key with the other hand, then out of the way of the animal.
+        if sway_readout > 0.0 {
+            draw_text(&mut canvas, 18, 54, 3, &format!("GAIN {:.2}", walker.sway));
+            draw_text(&mut canvas, 18, 78, 3, &format!("RATE {:.2}", walker.sway_rate));
+        }
 
         // A number on every ball, just above it, so one can be named exactly.
         if show_ids {
@@ -2680,6 +2735,20 @@ mod walk_tests {
             moving > 4.0,
             "the tail barely moves with the driver on: {moving:.2} units in four seconds"
         );
+    }
+
+    #[test]
+    fn every_character_the_readout_writes_has_a_glyph() {
+        // A missing glyph draws nothing, so a value would silently lose a digit
+        // and the readout would lie. These are the strings the two formats can
+        // produce at the ends of their ranges.
+        for text in ["GAIN 0.00", "GAIN 3.00", "RATE 0.15", "RATE 2.50", "0123456789"] {
+            // The space is the one character that is meant to draw nothing; it
+            // still costs a cell, which is what keeps the columns aligned.
+            for ch in text.chars().filter(|c| *c != ' ') {
+                assert!(glyph(ch).is_some(), "{ch:?} would draw as a blank cell");
+            }
+        }
     }
 
     #[test]

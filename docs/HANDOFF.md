@@ -21,8 +21,9 @@ Read this as orientation, not law. Refresh live state (`git status`, `git log`,
 held at a fixed point, and the free chain behind it carries the motion. There is
 also a lateral glide down the chain (`TAIL_LATERAL`, `TAIL_LATERAL_LAG`), because
 the solver is sagittal and the fore-and-aft sway is edge-on when the animal faces
-the camera. `K`/`L` scale it and `N`/`M` speed it up while it is being judged,
-and the title bar shows the values. Measured at gain 1: the tip covers 6.7 body
+the camera. `K`/`L` scale it and `N`/`M` speed it up while it is being judged, and the two
+values are drawn on the surface under the facing reading for four seconds after
+each press (`GAIN` then `RATE`), with the same numbers in the window title. Measured at gain 1: the tip covers 6.7 body
 units in four seconds, 11 px of screen reach in profile, 17 px of diff at the
 rear facing the camera; a two-frame diff while standing changes 232 pixels and
 231 of them are in the tail's corner. Tuning keys ignore auto-repeat now: holding
@@ -45,7 +46,7 @@ Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 
 ## Verified, and how
 
-- `cargo test --workspace`: 68 tests green (39 core, 2 silhouette, 27 in the
+- `cargo test --workspace`: 69 tests green (39 core, 2 silhouette, 28 in the
   sandbox binary). The counts test expects 48 balls, 11 on the head, sixteen
   claws, five tail balls. The previous handoff said 68 and "2 misc"; there is no
   such pair.
