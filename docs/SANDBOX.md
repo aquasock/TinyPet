@@ -49,7 +49,8 @@ draw every constraint as a line, **`W`/`S` forward and back**, **`A`/`D` turn le
 (hold, not toggle; `Q`/`E` are the same), `+`/`-` speed, `V` view pitch, arrows
 move the light, `Z`/`X` ambience, `[`/`]` ramp steps, `T` texture, `,`/`.` spine
 flex, `Tab` ball numbers, `P` print settings, `R` reset, `Space` pause, `Esc`
-quit.
+quit. `K`/`L` size the mouth and `N`/`M` move it up and down the snout; the two
+values are in the title bar while they are being judged.
 
 The **ear balls** have no live controls either. They were tuned from the
 keyboard - four pairs, `B` switching between the bases and the tips - and the
@@ -123,6 +124,9 @@ is asserted as a regression test.
   ear at this fidelity but cannot flop. See "The ears" below.
 - **The ear tip is a cap, not a flop.** It follows the base rigidly because it
   is pinned with it. Nothing here gives an ear its own swing.
+- **The mouth is a dot.** A black disc painted on the muzzle's sphere, in the
+  right place and clipped by the snout. It has no shape of its own and no
+  expression: no tongue, no open or closed state.
 - **Eyelids are removed.** Petz has no lid geometry — it parameterises one with
   `[Eyelid Color]` plus per-eye "eyelid height" and "eyelid tilt". Our lid-ball
   approximation was visible above the eye and read as a small ear.
@@ -386,7 +390,7 @@ anything; and a driven chain passes tests written for a physical one, which is
 why the liveliness test used to silence its driver. The text path that drew the
 readout went with the sway - `draw_number` draws digits again.
 
-## Next: the nose
+## The nose
 
 What the breed data says, before any code:
 
@@ -406,6 +410,51 @@ Worth noting the asymmetry in the table: the left nostril is colour 244 (black)
 and the right one is colour 15 (a light grey). That is either a quirk of this
 breed file or a genuine difference in how the two are drawn, and it is the first
 thing to check against a capture.
+
+## The mouth
+
+A first cut, asked for as "like the iris of the eye: a texture mapped to the
+snout, a small black circle". It is exactly that - a disc painted onto the
+muzzle's own sphere with `draw_disc_on_sphere`, the primitive the pupil already
+uses. Its depth is solved from that sphere, so it lies *on* the snout rather than
+sinking into it or floating over it, and the muzzle's own circle clips it, so it
+goes round the side instead of hanging off the edge.
+
+Placement is a direction in body space - forward, and `MOUTH_DROP` below the
+sphere's centre - projected the way the pupil's is:
+
+```
+MOUTH_RADIUS  4.5   body units; a 4 px disc at the default zoom
+MOUTH_DROP    0.45  below the muzzle's centre, as a fraction of its radius
+MOUTH_BIAS   -0.9   world units in front of the snout's surface
+```
+
+Facing the camera it sits under the middle of the muzzle. In profile it has slid
+to the front rim and is clipped to a sliver. Facing away it is culled, and the
+cull is not an optimisation: a disc drawn on a sphere takes that sphere's *near*
+surface for its depth, so a marking pointing away from the viewer would paint
+straight through the snout and appear on the back of the head.
+
+Two faults it took to get from "draws nothing" to "draws a dot", both worth
+keeping:
+
+- **The reference sphere must be the one the ball was actually drawn from.** The
+  rasterizer rounds a ball's centre to whole pixels and solves its surface from
+  there. A reference centre half a pixel away has a surface up to a unit off -
+  more than the bias - so the muzzle drew over the mouth everywhere but its
+  middle. A 4 px circle came out as two pixels.
+- **The radius must be rounded the same way.** The muzzle is 6.5 px before
+  rounding and 7 as drawn; using 6.5 as the reference disagreed with the drawn
+  ball in the same way. Both now round identically, and the bias alone decides.
+
+Measured under `PETZ_DIAG`, where the mouth paints green: 12 px facing the
+camera, 12 at three-quarters, 7 at 135 degrees, 4 at 120, 4-7 in profile, none
+facing away. `K`/`L` size it, `N`/`M` move it, `P` and the title bar report both,
+and `PETZ_MOUTH` / `PETZ_MOUTH_DROP` do the same headlessly for a sweep.
+
+What it is not, yet: a mouth. It is a disc in the right place - the reference
+draws a marking with a shape, and expression on top of that (mouth, tongue,
+eyelids) is the rest of the face work.
 
 ## Reference findings worth keeping
 

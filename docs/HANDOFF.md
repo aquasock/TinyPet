@@ -30,6 +30,14 @@ at the owner's request. The tail is physics only: it trails the rump, and hangs
 when the animal stands. The readout's text path went with it. `docs/SANDBOX.md`
 has the numbers and the reasons, so it need not be rebuilt blind.
 
+**The mouth, first cut.** A black disc painted onto the muzzle's own sphere with
+the same primitive as the pupil, so it lies on the snout and the muzzle's circle
+clips it as the head turns. Radius 4.5 body units, 0.45 of the muzzle's radius
+below its centre; `K`/`L` and `N`/`M` tune both live. Facing the camera it is 12
+pixels under the nose; in profile a sliver; facing away, culled. Two faults were
+fixed on the way, both about the reference sphere having to match the drawn ball
+exactly - see `docs/SANDBOX.md`.
+
 Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 
 - the ears locked down: bases at (-2, 28), apart 14, radius 9.5; tips 12 above,
@@ -43,7 +51,7 @@ Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 
 ## Verified, and how
 
-- `cargo test --workspace`: 67 tests green (39 core, 2 silhouette, 26 in the
+- `cargo test --workspace`: 68 tests green (39 core, 2 silhouette, 27 in the
   sandbox binary). The counts test expects 48 balls, 11 on the head, sixteen
   claws, five tail balls. The previous handoff said 68 and "2 misc"; there is no
   such pair.
@@ -87,15 +95,19 @@ Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 
 ## Next step
 
-The roadmap the user agreed: **ear motion**, then **the face** - mouth, tongue,
-and eyelid states for excited, playful, sad, scared. Tail animation is off the
-list by decision.
+The roadmap the user agreed: **the face** - mouth, tongue, and eyelid states for
+excited, playful, sad, scared. Tail animation is off the list by decision, and
+ear motion was never asked for after that.
 
-1. The ears are rigidly placed. What was asked of the tail - a little life that
-   the body's own motion cannot supply - is still being asked of them, so the
-   question that killed the tail's sway applies: is this animation, or physics?
-   Ask before building it.
-2. Then the face.
+The mouth has a first cut: a black disc on the snout, right place, no shape. The
+next questions are what a mouth should *be* - the reference draws a marking with
+a shape, and expression on top of it.
+
+1. Settle the mouth's shape and place by eye (`K`/`L`, `N`/`M`), then make its
+   numbers constants and drop the keys.
+2. Tongue and eyelid states: excited, playful, sad, scared. The eyelid is a
+   parameter in the reference - colour, height, tilt - not geometry, and the lid
+   shell already exists in the eye renderer, closed by default.
 
 ## Continuation
 
