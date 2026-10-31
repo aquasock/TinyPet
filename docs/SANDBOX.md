@@ -49,7 +49,7 @@ draw every constraint as a line, **`W`/`S` forward and back**, **`A`/`D` turn le
 (hold, not toggle; `Q`/`E` are the same), `+`/`-` speed, `V` view pitch, arrows
 move the light, `Z`/`X` ambience, `[`/`]` ramp steps, `T` texture, `,`/`.` spine
 flex, `Tab` ball numbers, `P` print settings, `R` reset, `Space` pause, `Esc`
-quit. `K`/`L` size the mouth and `N`/`M` move it up and down the snout; the two
+quit. `K`/`L` lengthen the mouth and `N`/`M` move it up and down the snout; the
 values are in the title bar while they are being judged.
 
 The **ear balls** have no live controls either. They were tuned from the
@@ -124,9 +124,9 @@ is asserted as a regression test.
   ear at this fidelity but cannot flop. See "The ears" below.
 - **The ear tip is a cap, not a flop.** It follows the base rigidly because it
   is pinned with it. Nothing here gives an ear its own swing.
-- **The mouth is a dot.** A black disc painted on the muzzle's sphere, in the
-  right place and clipped by the snout. It has no shape of its own and no
-  expression: no tongue, no open or closed state.
+- **The mouth is a straight line.** A thin black line painted on the muzzle's
+  sphere, in the right place and clipped by the snout. It does not curve, and it
+  has no expression: no tongue, no open or closed state.
 - **Eyelids are removed.** Petz has no lid geometry — it parameterises one with
   `[Eyelid Color]` plus per-eye "eyelid height" and "eyelid tilt". Our lid-ball
   approximation was visible above the eye and read as a small ear.
@@ -413,29 +413,40 @@ thing to check against a capture.
 
 ## The mouth
 
-A first cut, asked for as "like the iris of the eye: a texture mapped to the
-snout, a small black circle". It is exactly that - a disc painted onto the
-muzzle's own sphere with `draw_disc_on_sphere`, the primitive the pupil already
-uses. Its depth is solved from that sphere, so it lies *on* the snout rather than
-sinking into it or floating over it, and the muzzle's own circle clips it, so it
-goes round the side instead of hanging off the edge.
+Asked for as "like the iris of the eye: a texture mapped to the snout" - first a
+small black circle, then a thin line. Either way it is a texture, not a ball:
+painted onto the muzzle's own sphere with `draw_disc_on_sphere`, the primitive the
+pupil already uses. Its depth is solved from that sphere, so it lies *on* the
+snout rather than sinking into it or floating over it, and the muzzle's own circle
+clips it, so it goes round the side instead of hanging off the edge.
 
-Placement is a direction in body space - forward, and `MOUTH_DROP` below the
-sphere's centre - projected the way the pupil's is:
+The line is a disc with everything but one band of rows clipped away: the disc
+gives the length, because its middle rows are its widest, and the band gives the
+thickness. That way the line is painted with the same per-pixel sphere depth a
+disc gets, so it curves over the snout instead of being drawn across it.
 
 ```
-MOUTH_RADIUS  4.5   body units; a 4 px disc at the default zoom
+MOUTH_WIDTH  14.0   body units; a 7 px line at the default zoom
+MOUTH_THICK   2.0   body units; one pixel
 MOUTH_DROP    0.85  below the muzzle's centre, as a fraction of its radius
 MOUTH_BIAS   -0.9   world units in front of the snout's surface
 ```
 
-Facing the camera it sits under the middle of the muzzle. In profile it has slid
-to the front rim and is clipped to a sliver. Facing away it is culled, and the
-cull is not an optimisation: a disc drawn on a sphere takes that sphere's *near*
-surface for its depth, so a marking pointing away from the viewer would paint
-straight through the snout and appear on the back of the head.
+Placement is a direction in body space - forward, and `MOUTH_DROP` below the
+sphere's centre - projected the way the pupil's is. Facing the camera the line
+sits under the middle of the muzzle. In profile it has slid to the front rim and
+the snout clips it to a stub. Facing away it is culled, and the cull is not an
+optimisation: a disc drawn on a sphere takes that sphere's *near* surface for its
+depth, so a marking pointing away from the viewer would paint straight through the
+snout and appear on the back of the head. Exactly side-on, `cos(heading)` is a
+rounding error either side of zero, so the cull carries a tolerance; without it
+the mouth showed facing one way and disappeared facing the other.
 
-Two faults it took to get from "draws nothing" to "draws a dot", both worth
+The drop is at the snout's limit: at 0.85 the line's lower edge is on the muzzle's
+own rim, and past that the rim is what clips it, so the pixels stop changing. The
+height was settled by eye at this value.
+
+Two faults it took to get from "draws nothing" to "draws at all", both worth
 keeping:
 
 - **The reference sphere must be the one the ball was actually drawn from.** The
@@ -447,25 +458,14 @@ keeping:
   rounding and 7 as drawn; using 6.5 as the reference disagreed with the drawn
   ball in the same way. Both now round identically, and the bias alone decides.
 
-The drop is at the snout's limit, and that limit is worth knowing before anyone
-tries to move it further: the muzzle is 13 body units in radius, the nose takes
-the middle 5, and a 9-unit mouth needs its own diameter below that. At 0.85 the
-disc's lower edge sits on the muzzle's own rim; at 1.10 it draws exactly the same
-pixels, because past the rim the snout's circle is what is clipping it, not the
-drop. A lower mouth needs either a smaller dot or a larger muzzle.
+Measured under `PETZ_DIAG`, where the mouth paints green: 7 px across facing the
+camera, 7 at 165 degrees, 5 at 150, 4 at 135, 3 at 120 and 3 in profile either
+way, none facing away. `K`/`L` lengthen it, `N`/`M` move it, `P` and the title bar
+report both, and `PETZ_MOUTH` / `PETZ_MOUTH_THICK` / `PETZ_MOUTH_DROP` do the same
+headlessly for a sweep.
 
-Measured under `PETZ_DIAG`, where the mouth paints green: 12 px facing the
-camera, 12 at three-quarters, 7 at 135 degrees, 4 at 120, 4-7 in profile, none
-facing away. `K`/`L` size it, `N`/`M` move it, `P` and the title bar report both,
-and `PETZ_MOUTH` / `PETZ_MOUTH_DROP` do the same headlessly for a sweep.
-
-The drop is settled: seen in the window and accepted at 0.85, the dot touching the
-bottom of the snout. The size is still open - `K`/`L` stay live until it is judged
-the same way, and then both go the way the ears' and the eyes' keys went.
-
-What it is not, yet: a mouth. It is a disc in the right place - the reference
-draws a marking with a shape, and expression on top of that (mouth, tongue,
-eyelids) is the rest of the face work.
+What it is not, yet: a mouth. A straight line in the right place - no curve, and
+no expression on top of it (no tongue, no open or closed state).
 
 ## Reference findings worth keeping
 

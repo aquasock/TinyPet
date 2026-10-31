@@ -30,15 +30,16 @@ at the owner's request. The tail is physics only: it trails the rump, and hangs
 when the animal stands. The readout's text path went with it. `docs/SANDBOX.md`
 has the numbers and the reasons, so it need not be rebuilt blind.
 
-**The mouth, first cut.** A black disc painted onto the muzzle's own sphere with
-the same primitive as the pupil, so it lies on the snout and the muzzle's circle
-clips it as the head turns. Radius 4.5 body units, 0.85 of the muzzle's radius
-below its centre - the snout's limit, where the dot's lower edge meets the rim; `K`/`L` and `N`/`M` tune both live. Facing the camera it is 11
-pixels at the bottom of the snout; in profile a sliver; facing away, culled. Its
-height is settled by eye; its size is still being judged, so `K`/`L`/`N`/`M` are
-still live. Two faults were
-fixed on the way, both about the reference sphere having to match the drawn ball
-exactly - see `docs/SANDBOX.md`.
+**The mouth, a thin line.** A black line painted onto the muzzle's own sphere with
+the same primitive as the pupil: a disc with everything but one band of rows
+clipped away, so the length comes from the disc and the thickness from the band,
+and the marking takes the sphere's depth per pixel rather than being drawn across
+it. `MOUTH_WIDTH` 14 body units (7 px), `MOUTH_THICK` 2 (1 px), `MOUTH_DROP` 0.85 -
+the snout's limit, settled by eye. `K`/`L` lengthen it and `N`/`M` move it while it
+is being judged. Facing the camera it is 7 px; in profile 3; facing away, culled.
+Three faults fixed on the way, all about the reference sphere having to match the
+drawn ball exactly, or the cull needing a tolerance at exactly side-on - see
+`docs/SANDBOX.md`.
 
 Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 

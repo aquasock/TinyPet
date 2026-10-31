@@ -99,17 +99,17 @@ const EAR_TIP_SINK: f32 = 0.20;
 /// is 1.0; the tail is deliberately looser so the chain can stretch and whip.
 const TAIL_LINK: f32 = 0.12;
 
-/// The mouth: a black disc painted onto the muzzle's own sphere, the way the
-/// pupil is painted onto the sclera - a texture, not a ball. Radius in body
-/// units; `MOUTH_DROP` is how far below the sphere's centre it sits, as a
-/// fraction of the muzzle's radius.
+/// The mouth: a thin line painted onto the muzzle's own sphere, the way the
+/// pupil is painted onto the sclera - a texture, not a ball.
 ///
-/// The drop is at the snout's limit. The muzzle is 13 body units in radius, the
-/// nose takes the middle 5 of them, and a 9-unit mouth needs its own diameter of
-/// room below that: 0.85 puts the disc's lower edge on the muzzle's own rim, and
-/// any further and the snout's circle clips it to a crescent that does not move
-/// any more - 0.85 and 1.10 draw identical pixels.
-const MOUTH_RADIUS: f32 = 4.5;
+/// `MOUTH_WIDTH` is its length and `MOUTH_THICK` its thickness, both in body
+/// units; at the default zoom of 0.5, 14 and 2 come out as a 7 px line one pixel
+/// thick. `MOUTH_DROP` is how far below the sphere's centre it sits, as a
+/// fraction of the muzzle's radius, and it is at the snout's limit: at 0.85 the
+/// line's lower edge is on the muzzle's own rim, and further down the rim is what
+/// is clipping it, so the pixels stop changing.
+const MOUTH_WIDTH: f32 = 14.0;
+const MOUTH_THICK: f32 = 2.0;
 const MOUTH_DROP: f32 = 0.85;
 
 /// The mouth's colour: black on this palette, the same entry the retail iris
@@ -570,9 +570,12 @@ struct Walker {
     eye_lift: f32,
     /// Last movement input, so the pose knows whether to animate a gait.
     moving: f32,
-    /// The mouth's radius in body units, and how far below the muzzle's centre
-    /// it sits as a fraction of that radius. Live while it is being judged.
-    mouth_radius: f32,
+    /// The mouth line's length and thickness in body units, and how far below
+    /// the muzzle's centre it sits as a fraction of that radius. The length is
+    /// live while it is being judged; the thickness is not, because at this
+    /// zoom the only choices are one pixel and two.
+    mouth_width: f32,
+    mouth_thick: f32,
     mouth_drop: f32,
 }
 
@@ -646,10 +649,14 @@ impl Walker {
             moving: 1.0,
             // Headless instruments, like PETZ_ZOOM: the mouth can be swept
             // without a window or a keyboard.
-            mouth_radius: std::env::var("PETZ_MOUTH")
+            mouth_width: std::env::var("PETZ_MOUTH")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(MOUTH_RADIUS),
+                .unwrap_or(MOUTH_WIDTH),
+            mouth_thick: std::env::var("PETZ_MOUTH_THICK")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(MOUTH_THICK),
             mouth_drop: std::env::var("PETZ_MOUTH_DROP")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -991,15 +998,18 @@ fn report_eyes(w: &Walker) {
 }
 
 fn report_mouth(w: &Walker) {
-    println!("mouth: radius {:.1}  drop {:.2}", w.mouth_radius, w.mouth_drop);
+    println!(
+        "mouth line: length {:.1}  thick {:.1}  drop {:.2}",
+        w.mouth_width, w.mouth_thick, w.mouth_drop
+    );
 }
 
 /// Put the mouth's live values in the window title, where they can be read
 /// without going back to the terminal that started the app.
 fn show_mouth(canvas: &mut sdl2::render::Canvas<sdl2::video::Window>, w: &Walker) {
     let _ = canvas.window_mut().set_title(&format!(
-        "petz ragdoll sandbox - mouth radius {:.1} drop {:.2}",
-        w.mouth_radius, w.mouth_drop
+        "petz ragdoll sandbox - mouth length {:.1} drop {:.2}",
+        w.mouth_width, w.mouth_drop
     ));
 }
 
@@ -1189,7 +1199,7 @@ fn main() -> Result<(), String> {
          drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
          light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
          (the ear balls are frozen: no keys - see EAR_* in the source)\n\
-         mouth: K/L size, N/M height on the snout (values in the title bar)\n\
+         mouth: K/L length, N/M height on the snout (values in the title bar)\n\
          Shift+drag: carry the whole animal   G: constraint links\n\
          Tab: ball numbers   P: settings   R: reset   Space: pause   Esc: quit"
     );
@@ -1294,12 +1304,12 @@ fn main() -> Result<(), String> {
                     // values are in the title bar until they are settled and the
                     // keys go.
                     sdl2::keyboard::Keycode::K => {
-                        walker.mouth_radius = (walker.mouth_radius - 0.5).max(1.0);
+                        walker.mouth_width = (walker.mouth_width - 2.0).max(2.0);
                         report_mouth(&walker);
                         show_mouth(&mut canvas, &walker);
                     }
                     sdl2::keyboard::Keycode::L => {
-                        walker.mouth_radius = (walker.mouth_radius + 0.5).min(12.0);
+                        walker.mouth_width = (walker.mouth_width + 2.0).min(30.0);
                         report_mouth(&walker);
                         show_mouth(&mut canvas, &walker);
                     }
@@ -1739,12 +1749,21 @@ fn main() -> Result<(), String> {
                         (fx - cx0).powi(2) + (fy - cy0).powi(2) <= re0 * re0
                     }
                 };
-                let mr = (walker.mouth_radius * zoom).round().max(1.0) as i32;
+                // A line is a disc with everything but one band of rows
+                // clipped away: the disc gives the length (its middle rows are
+                // its widest) and the band gives the thickness, so the line is
+                // painted with the same per-pixel sphere depth a disc gets and
+                // lies on the snout instead of across it.
+                let len = (walker.mouth_width * zoom).round().max(1.0) as i32;
+                let thick = (walker.mouth_thick * zoom).round().max(1.0) as i32;
+                let ly = (cy + oy) as i32;
+                let (lo, hi) = (ly - (thick - 1) / 2, ly + thick / 2);
+                let band = move |x: i32, y: i32| -> bool { inside(x, y) && y >= lo && y <= hi };
                 draw_disc_on_sphere(
                     &mut surface, &mut depth, &table,
-                    (cx + ox) as i32, (cy + oy) as i32,
-                    (mr * 2) as usize,
-                    cx, cy, re, de, MOUTH_BIAS, mouth_col, &inside,
+                    (cx + ox) as i32, ly,
+                    len as usize,
+                    cx, cy, re, de, MOUTH_BIAS, mouth_col, &band,
                 );
             }
         }
