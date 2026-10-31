@@ -452,8 +452,13 @@ would paint straight through the snout.
 - and at the height of the mouth its circle is only 7.5 px wide, with the nose
 taking the middle 5 units above it. A two-hump curve is legible here at 9 px wide
 and 3 px of rise, and not much beyond that: the humps already meet the nose's
-lower corners, and a wider mouth runs into the rim. A genuinely big cartoon mouth
-needs a bigger muzzle, which is a change to the body, not to the marking.
+lower corners, and a wider mouth runs into the rim.
+
+A genuinely big cartoon mouth needs a bigger muzzle, which is a change to the
+body rather than to the marking. That was offered and **declined** by the owner,
+so the numbers above stand: the face's proportions are what the hand-authored
+skeleton gives, and making them facts - loading a real `.pet` - is a separate
+piece of work.
 
 Three faults it took to get from "draws nothing" to "draws at all", all worth
 keeping:
