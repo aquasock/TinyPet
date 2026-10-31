@@ -32,8 +32,8 @@ has the numbers and the reasons, so it need not be rebuilt blind.
 
 **The mouth, first cut.** A black disc painted onto the muzzle's own sphere with
 the same primitive as the pupil, so it lies on the snout and the muzzle's circle
-clips it as the head turns. Radius 4.5 body units, 0.45 of the muzzle's radius
-below its centre; `K`/`L` and `N`/`M` tune both live. Facing the camera it is 12
+clips it as the head turns. Radius 4.5 body units, 0.85 of the muzzle's radius
+below its centre - the snout's limit, where the dot's lower edge meets the rim; `K`/`L` and `N`/`M` tune both live. Facing the camera it is 12
 pixels under the nose; in profile a sliver; facing away, culled. Two faults were
 fixed on the way, both about the reference sphere having to match the drawn ball
 exactly - see `docs/SANDBOX.md`.

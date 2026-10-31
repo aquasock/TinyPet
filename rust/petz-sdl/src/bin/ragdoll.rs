@@ -103,8 +103,14 @@ const TAIL_LINK: f32 = 0.12;
 /// pupil is painted onto the sclera - a texture, not a ball. Radius in body
 /// units; `MOUTH_DROP` is how far below the sphere's centre it sits, as a
 /// fraction of the muzzle's radius.
+///
+/// The drop is at the snout's limit. The muzzle is 13 body units in radius, the
+/// nose takes the middle 5 of them, and a 9-unit mouth needs its own diameter of
+/// room below that: 0.85 puts the disc's lower edge on the muzzle's own rim, and
+/// any further and the snout's circle clips it to a crescent that does not move
+/// any more - 0.85 and 1.10 draw identical pixels.
 const MOUTH_RADIUS: f32 = 4.5;
-const MOUTH_DROP: f32 = 0.45;
+const MOUTH_DROP: f32 = 0.85;
 
 /// The mouth's colour: black on this palette, the same entry the retail iris
 /// uses for a pupil, and green under `PETZ_DIAG` so it can be found in a dump
@@ -2682,7 +2688,7 @@ mod walk_tests {
         // The mouth is a marking on the front of the snout, not a ball: it is a
         // disc of the muzzle's own surface. Two things follow, and both are
         // asserted here because both are easy to get wrong silently.
-        let (r, d) = (6.5f32, 0.45f32);
+        let (r, d) = (6.5f32, MOUTH_DROP);
         // Facing the camera, it sits under the middle of the muzzle.
         let (x, y) = mouth_offset(std::f32::consts::PI, r, d).expect("no mouth facing the camera");
         assert!(x.abs() < 0.01, "the mouth is off-centre facing the camera: x {x}");
@@ -2694,9 +2700,9 @@ mod walk_tests {
         let (x, y) = mouth_offset(std::f32::consts::FRAC_PI_2, r, 0.0).expect("no mouth in profile");
         assert!((x - r).abs() < 1e-4 && y.abs() < 1e-4, "level profile mouth is at ({x}, {y})");
         let (x, _) = mouth_offset(std::f32::consts::FRAC_PI_2, r, d).expect("no mouth in profile");
-        assert!(x > 0.85 * r && x < r, "the mouth has not moved to the front of the snout: x {x}");
+        assert!(x > 0.5 * r && x < r, "the mouth has not moved to the front of the snout: x {x}");
         let (x, _) = mouth_offset(-std::f32::consts::FRAC_PI_2, r, d).expect("no mouth in profile");
-        assert!(x < -0.85 * r && x > -r, "the mouth has not moved to the front on the other side: x {x}");
+        assert!(x < -0.5 * r && x > -r, "the mouth has not moved to the front on the other side: x {x}");
         // Facing away, there is nothing to paint: a disc takes the near surface
         // for its depth, so drawing it would put it on the back of the head.
         assert!(mouth_offset(0.0, r, d).is_none(), "the mouth shows through the skull");

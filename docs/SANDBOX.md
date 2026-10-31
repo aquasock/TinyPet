@@ -425,7 +425,7 @@ sphere's centre - projected the way the pupil's is:
 
 ```
 MOUTH_RADIUS  4.5   body units; a 4 px disc at the default zoom
-MOUTH_DROP    0.45  below the muzzle's centre, as a fraction of its radius
+MOUTH_DROP    0.85  below the muzzle's centre, as a fraction of its radius
 MOUTH_BIAS   -0.9   world units in front of the snout's surface
 ```
 
@@ -446,6 +446,13 @@ keeping:
 - **The radius must be rounded the same way.** The muzzle is 6.5 px before
   rounding and 7 as drawn; using 6.5 as the reference disagreed with the drawn
   ball in the same way. Both now round identically, and the bias alone decides.
+
+The drop is at the snout's limit, and that limit is worth knowing before anyone
+tries to move it further: the muzzle is 13 body units in radius, the nose takes
+the middle 5, and a 9-unit mouth needs its own diameter below that. At 0.85 the
+disc's lower edge sits on the muzzle's own rim; at 1.10 it draws exactly the same
+pixels, because past the rim the snout's circle is what is clipping it, not the
+drop. A lower mouth needs either a smaller dot or a larger muzzle.
 
 Measured under `PETZ_DIAG`, where the mouth paints green: 12 px facing the
 camera, 12 at three-quarters, 7 at 135 degrees, 4 at 120, 4-7 in profile, none
