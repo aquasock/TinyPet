@@ -459,6 +459,10 @@ camera, 12 at three-quarters, 7 at 135 degrees, 4 at 120, 4-7 in profile, none
 facing away. `K`/`L` size it, `N`/`M` move it, `P` and the title bar report both,
 and `PETZ_MOUTH` / `PETZ_MOUTH_DROP` do the same headlessly for a sweep.
 
+The drop is settled: seen in the window and accepted at 0.85, the dot touching the
+bottom of the snout. The size is still open - `K`/`L` stay live until it is judged
+the same way, and then both go the way the ears' and the eyes' keys went.
+
 What it is not, yet: a mouth. It is a disc in the right place - the reference
 draws a marking with a shape, and expression on top of that (mouth, tongue,
 eyelids) is the rest of the face work.
