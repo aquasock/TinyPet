@@ -16,12 +16,15 @@ Read this as orientation, not law. Refresh live state (`git status`, `git log`,
 
 ## Landed since the last handoff
 
-**The tail's idle sway.** The root is driven round a slow oval
-(`TAIL_SWAY_X/Y/RATE`, plus one swing per stride while walking) instead of being
-held at a fixed point, and the free chain behind it carries the motion. There is
-also a lateral glide down the chain (`TAIL_LATERAL`, `TAIL_LATERAL_LAG`), because
-the solver is sagittal and the fore-and-aft sway is edge-on when the animal faces
-the camera. `K`/`L` scale it and `N`/`M` speed it up while it is being judged, and the two
+**The tail's idle sway.** The root is pinned to the butt ball - derived from it
+every frame, like a hip from its spine ball - because driven it wandered 6.1 body
+units off the rump in a walking step and the base of the tail hovered behind the
+cat. The sway now drives the first *free* ball instead (`TAIL_SWAY_X/Y/RATE`,
+`TAIL_DRIVE` 0.10, plus one swing per stride while walking), so the joint cannot
+open and the four free links carry the motion out: 8.75 body units of tip travel
+at gain 1. There is also a lateral glide down the chain (`TAIL_LATERAL`,
+`TAIL_LATERAL_LAG`) riding on the rump's own lateral flex, because the solver is
+sagittal and the fore-and-aft sway is edge-on when the animal faces the camera. `K`/`L` scale it and `N`/`M` speed it up while it is being judged, and the two
 values are drawn on the surface under the facing reading for four seconds after
 each press (`GAIN` then `RATE`), with the same numbers in the window title. Measured at gain 1: the tip covers 6.7 body
 units in four seconds, 11 px of screen reach in profile, 17 px of diff at the
@@ -46,7 +49,7 @@ Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 
 ## Verified, and how
 
-- `cargo test --workspace`: 69 tests green (39 core, 2 silhouette, 28 in the
+- `cargo test --workspace`: 70 tests green (39 core, 2 silhouette, 29 in the
   sandbox binary). The counts test expects 48 balls, 11 on the head, sixteen
   claws, five tail balls. The previous handoff said 68 and "2 misc"; there is no
   such pair.
@@ -72,9 +75,11 @@ Previously landed and pushed - `ac092e4`, `bb16cb9`, `4f9e442`, `fefa649`:
 - The ears are pinned and placed exactly (the pair must not drift apart), and
   linked to the skull so a pulled ear drags the head. They snap back on release
   in one frame; that is the accepted cost, not a bug.
-- The tail is one held root and four free balls, with soft links and a
-  per-ball `drag` multiplier of about 0.998/0.985. Driving the chain makes a rod;
-  leaving the root slack drops the tail under the cat.
+- The tail is one **pinned** root and four free balls, with soft links and a
+  per-ball `drag` multiplier of about 0.998/0.985. The root is derived from the
+  butt ball every frame, never driven: driven, it lags the rump and the joint
+  opens. Driving the whole chain makes a rod; driving the first free ball at 0.10
+  does not.
 - The spine is a plain chain plus one brace (skull to spine[2]). Its diagonals
   were measured at 2.4 degrees of fold and removed.
 - Palette is a diagnostic set: black fur, snout and ear bases blue (240), nose

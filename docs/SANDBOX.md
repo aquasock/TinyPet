@@ -149,9 +149,10 @@ is asserted as a regression test.
   of a second; with a lighter hand it carries on swinging, which is the whole
   difference between a tail and a stick. Measured through a turn and a stop: 75
   degrees of travel after the turn ends against 20 for the body's damping.
-- **The tail is one held ball and a free chain.** The root sits high on the
+- **The tail is one pinned ball and a free chain.** The root sits high on the
   rump, above the line of the spine - a cat's tail leaves the body above the
-  anus, which is level - and is driven there at `follow = 0.25`. Every ball past
+  anus, which is level - and is pinned there, derived from the butt ball every
+  frame, the way a hip is derived from the spine ball it hangs from. Every ball past
   it (44-47) carries no target at all, so the chain dangles and can swing right
   round the root. Left unanimated that reads as a broken tail: the shape is
   right, what it needs is motion. The root is now driven round a slow oval - see
@@ -361,28 +362,46 @@ The shape was never the problem; stillness was. Every ball past the root is a
 free link with no target, so a root held at a fixed point leaves the whole chain
 hanging dead - correct, and read as broken.
 
-The fix is one driver on the root and nothing else touched:
+The first attempt drove the root itself, and that was wrong for a second reason
+that only showed once the numbers were taken: **the root came off the rump.**
+Measured against the butt ball, a driven root wandered up to 6.1 body units off
+its place in a walking step, so the base of the tail hovered behind the cat. The
+root is part of the body. It is now pinned to the ball it grows out of, exactly
+as a hip is pinned to its spine ball:
+
+```
+root = butt.pos + (252, GROUND - 68 - 13) - butt.rest
+```
+
+placed every frame, `pinned`, with the butt-to-root link's rest length held at
+the placed distance so the spring never argues with the placement. The residual
+is the butt moving *inside* a step after the placement - 0.31 units, a seventh of
+a surface pixel, corrected on the next frame.
+
+So the sway drives the first **free** ball instead, one long the chain from the
+root:
 
 ```
 TAIL_SWAY_X     6.0   body units fore-and-aft
 TAIL_SWAY_Y     4.0   body units up and down
 TAIL_SWAY_RATE  0.9   rad/s, about 7 s to a full sway
 TAIL_GAIT_X     5.0   one extra swing per stride, in phase with the legs
+TAIL_DRIVE      0.10  how hard that ball is pulled toward the sway's target
 ```
 
-Two rates, the second twice the first and 0.6 rad out of phase, so the root
+Two rates, the second twice the first and 0.6 rad out of phase, so the target
 traces an oval rather than a line traced out and back. While walking the gait's
 own phase adds a swing per stride on top, so the tail answers the legs instead of
-only the clock.
+only the clock. The drive is light on purpose: this is a bend at the base of the
+tail, not a target the chain has to fight, and the four free links behind it do
+the rest. Driving *every* ball is the fault that made the tail a rigid rod; one
+light drive one ball in does not.
 
-The amplitude is small because the chain multiplies it: the root survives the
-weak drive (`follow = 0.25`) and the four free balls behind it lag and overshoot.
-Measured at gain 1, standing, the tip covers **6.7 body units** in a four-second
-window, which at the default zoom is **11 px** of horizontal reach on screen -
-about a third of the tail's own length, and enough to be seen without the tail
-reading as a wagging stick. The driving is the only thing in the frame that
-moves while the animal stands: a two-frame diff across 3.5 s changed 232 pixels,
-231 of them in the rear quarter where the tail is.
+Measured at gain 1, standing, the tip covers **8.75 body units** in a four-second
+window - more than the driven root produced, which is the free chain doing what
+it is for. At the default zoom that is 11 px of reach on screen, about a third of
+the tail's own length: enough to be seen, not enough to read as a wagging stick.
+The sway is the only thing in the frame that moves while the animal stands.
 
 Two things learned while instrumenting it, both worth keeping:
 
@@ -395,7 +414,7 @@ driver-off tail still covers 26 units. The test waits twenty seconds, after
   it on.
 - **A driven chain can pass a damping test on its own.** The tail-liveliness
   test (75 degrees of travel after a turn, against 20 damped like the body)
-  would report a dead tail as lively once the root is animated, so it silences
+  would report a dead tail as lively once the chain is animated, so it silences
   the driver (`w.sway = 0`) and measures the physics alone. The sway has its own
   test, and it compares against the same animal with the driver off rather than
   against zero.
@@ -426,8 +445,11 @@ A tail also sways side to side, and that part is authored per ball exactly the
 way the spine's lateral flex is (`TAIL_LATERAL` 12 body units at the tip,
 `TAIL_LATERAL_LAG` 0.45 rad per ball). Three details make it read:
 
-- **The amplitude grows down the chain**, `(i+1)/5`, so the root stays on the
-  centre line and the tip carries the motion.
+- **The amplitude grows down the chain**, `(i+1)/5`, so the root barely moves
+  and the tip carries the motion.
+- **It rides on the rump's own lateral flex** rather than replacing it, or the
+  joint would step sideways by the whole of the spine's flex - the same opening
+  as before, in the other axis.
 - **The phase is delayed per ball**, so the sway travels out to the tip instead
   of shifting all five balls sideways at once - the difference between a sway
   and a tail being slid along a rail.

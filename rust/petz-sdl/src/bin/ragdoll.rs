@@ -109,6 +109,11 @@ const TAIL_SWAY_X: f32 = 6.0;
 const TAIL_SWAY_Y: f32 = 4.0;
 const TAIL_SWAY_RATE: f32 = 0.9;
 
+/// How hard the sway drives the first free tail ball. Light: this is a bend at
+/// the base of the tail, not a target the chain has to fight. Driving every ball
+/// made the tail a rigid rod; driving one, weakly, lets the rest whip.
+const TAIL_DRIVE: f32 = 0.10;
+
 /// How long the on-screen readout of the tail's values stays up after a key
 /// moves one of them. Long enough to press a key and then read it.
 const READOUT_SECS: f32 = 4.0;
@@ -557,6 +562,13 @@ fn build() -> (Ragdoll, Creature) {
         let rest = r.particles[tail_prev].pos.sub(r.particles[t].pos).length();
         r.constraints
             .push(petz_core::Constraint::soft(tail_prev, t, rest, TAIL_LINK));
+        if i == 0 {
+            // The root is part of the body, not a thing parked behind it. Held
+            // by a drive it lagged the rump whenever the rump moved, and the
+            // joint opened; pinned, the pose places it on the butt ball every
+            // frame and nothing can pull it off. Same treatment as a hip.
+            r.particles[t].pinned = true;
+        }
         tail_prev = t;
         tail.push(t);
     }
@@ -853,27 +865,55 @@ impl Walker {
         const ROOT_LIFT: f32 = 13.0;
         let t = self.clock;
         if let Some(&root) = creature.tail.first() {
-            // The root is held, not nailed down: it traces a slow oval behind
-            // the rump and carries the chain with it. Left at a fixed point the
-            // tail is correct and dead - every ball past the root is a free
-            // link with nothing to push it, so it just hangs.
-            //
-            // Two rates, the second twice the first and out of phase, so the
-            // path is an oval rather than a line traced back and forth.
-            let sway_x = (t * self.sway_rate).sin();
-            let sway_y = (t * self.sway_rate * 2.0 + 0.6).sin();
-            // Walking adds one swing per stride, in phase with the legs, on top
-            // of the idle drift.
-            let stride = if walking {
-                (self.gait.phase * std::f32::consts::TAU).sin()
-            } else {
-                0.0
-            };
-            let home = Vec2::new(
-                252.0 - self.sway * (TAIL_SWAY_X * sway_x + TAIL_GAIT_X * stride),
-                GROUND - 68.0 - ROOT_LIFT + lift - self.sway * TAIL_SWAY_Y * sway_y,
-            );
-            doll.drive_to(root, home, 0.25);
+            // The root grows out of the rump, so it is placed on the ball it
+            // grows out of: the offset it holds in the rest pose, carried on the
+            // butt ball's live position. Derived, not driven - a driven root lags
+            // whatever moves the rump and the joint opens, which is the same
+            // fault the hips had and fixed the same way.
+            let home = Vec2::new(252.0, GROUND - 68.0 - ROOT_LIFT);
+            let off = home.sub(rest.spine[0]);
+            let butt = doll.particles[creature.spine[0]].pos;
+            doll.drag_to(root, Vec2::new(butt.x + off.x, butt.y + off.y));
+            if let Some(p) = doll.particles.get_mut(root) {
+                // A grab-release clears the pin on whatever was grabbed, so the
+                // pose asserts it back: the root is part of the body always.
+                p.pinned = true;
+            }
+            // Keep the link neutral while the pose owns the placement: it is
+            // what holds the joint when a grab suspends the pose, and it must
+            // not argue with the placement the rest of the time.
+            doll.set_rest(creature.spine[0], root, off.length());
+        }
+
+        // The fore-and-aft half of the sway drives the first *free* ball, not
+        // the root. Moving the root opens the joint, which is the whole reason
+        // the root is pinned; a weak drive one ball further along bends the base
+        // of the tail and the four free links carry the motion out to the tip.
+        if let (Some(&first), Some(&root)) = (creature.tail.get(1), creature.tail.first()) {
+            if self.sway > 0.0 {
+                let rel = rest.tail[1].sub(rest.tail[0]);
+                // Two rates, the second twice the first and out of phase, so the
+                // path is an oval rather than a line traced back and forth.
+                let sway_x = (t * self.sway_rate).sin();
+                let sway_y = (t * self.sway_rate * 2.0 + 0.6).sin();
+                // Walking adds one swing per stride, in phase with the legs.
+                let stride = if walking {
+                    (self.gait.phase * std::f32::consts::TAU).sin()
+                } else {
+                    0.0
+                };
+                let base = doll.particles[root].pos;
+                let goal = Vec2::new(
+                    base.x + rel.x - self.sway * (TAIL_SWAY_X * sway_x + TAIL_GAIT_X * stride),
+                    base.y + rel.y - self.sway * TAIL_SWAY_Y * sway_y,
+                );
+                doll.drive_to(first, goal, TAIL_DRIVE);
+            } else if let Some(p) = doll.particles.get_mut(first) {
+                // With the sway off the whole chain is free, which is what a
+                // measurement of its damping needs.
+                p.target = None;
+                p.follow = 0.0;
+            }
         }
 
         // The side-to-side half, which is what reads when the animal faces the
@@ -881,11 +921,16 @@ impl Walker {
         // travels to the tip instead of the tail shifting as one piece.
         {
             let n = creature.tail.len().max(1) as f32;
+            // The chain hangs off the rump, so it carries the rump's own lateral
+            // flex as a base and the sway rides on top of it. Without that the
+            // joint steps sideways by the whole of the spine's flex, which is
+            // the same opening in the other axis.
+            let base_side = doll.particles[creature.spine[0]].side;
             for (i, &ball) in creature.tail.iter().enumerate() {
                 let reach = (i as f32 + 1.0) / n;
                 let phase = t * self.sway_rate - i as f32 * TAIL_LATERAL_LAG;
                 if let Some(p) = doll.particles.get_mut(ball) {
-                    p.side = self.sway * TAIL_LATERAL * reach * phase.sin();
+                    p.side = base_side + self.sway * TAIL_LATERAL * reach * phase.sin();
                 }
             }
         }
@@ -935,6 +980,9 @@ struct Pose {
     spine: Vec<Vec2>,
     head: Vec<Vec2>,
     legs: Vec<Vec2>,
+    /// Authored tail positions, kept so the sway can be aimed relative to the
+    /// root without re-deriving the chain's spacings every frame.
+    tail: Vec<Vec2>,
     hip_to_knee: Vec<f32>,
     knee_to_foot: Vec<f32>,
 }
@@ -943,6 +991,7 @@ fn measure(doll: &Ragdoll, c: &Creature) -> Pose {
     let spine = c.spine.iter().map(|&i| doll.particles[i].pos).collect();
     let head = c.head.iter().map(|&i| doll.particles[i].pos).collect();
     let legs: Vec<Vec2> = c.legs.iter().map(|l| doll.particles[l.hip].pos).collect();
+    let tail = c.tail.iter().map(|&i| doll.particles[i].pos).collect();
     let hip_to_knee = c
         .legs
         .iter()
@@ -953,7 +1002,7 @@ fn measure(doll: &Ragdoll, c: &Creature) -> Pose {
         .iter()
         .map(|l| doll.particles[l.knee].pos.sub(doll.particles[l.foot].pos).length())
         .collect();
-    Pose { spine, head, legs, hip_to_knee, knee_to_foot }
+    Pose { spine, head, legs, tail, hip_to_knee, knee_to_foot }
 }
 
 /// Shortest signed difference between two angles, in (-pi, pi].
@@ -2621,16 +2670,19 @@ mod walk_tests {
         // root (the tail drops under the cat), and a chain damped like the body,
         // which swings out and snaps back and reads as stiff.
         let (mut doll, c, rest, mut w) = rig();
+        // The sway is off for this one: it drives the first free ball, and the
+        // shape being measured here is what the chain does with nothing driving
+        // it at all.
+        w.sway = 0.0;
         for _ in 0..90 {
             w.pose(&mut doll, &c, &rest);
             doll.step(1.0 / 120.0);
         }
         let root = c.tail[0];
-        assert!(doll.particles[root].follow > 0.0, "the tail root lost its drive");
+        assert!(doll.particles[root].pinned, "the tail root is not pinned to the rump");
         assert!(
-            doll.particles[root].follow <= 0.5,
-            "the tail root is rigid: {}",
-            doll.particles[root].follow
+            doll.particles[root].target.is_none(),
+            "the tail root is still driven somewhere"
         );
         for &i in &c.tail[1..] {
             assert!(
@@ -2655,9 +2707,6 @@ mod walk_tests {
         );
         // It keeps moving after the turn stops. Damped like the body it snapped
         // back and died within a quarter second.
-        // The idle sway is switched off for this measurement: it is a driver,
-        // and with it running any tail would pass, including a dead one.
-        w.sway = 0.0;
         let angle = |doll: &Ragdoll| {
             let tip = doll.particles[*c.tail.last().unwrap()].pos;
             let d = tip.sub(doll.particles[c.tail[0]].pos);
@@ -2682,6 +2731,52 @@ mod walk_tests {
             travel.to_degrees() > 20.0,
             "the tail stops dead once the turn ends: {:.1} degrees in 1.5 s",
             travel.to_degrees()
+        );
+    }
+
+    #[test]
+    fn the_tail_root_cannot_come_off_the_rump() {
+        // Ball 43 grows out of the butt ball. Driven it lagged the rump whenever
+        // the rump moved and the joint opened - 6.1 units in a walking step with
+        // the sway pulling it about, which is visible as a tail hovering behind
+        // the cat. Placed from the butt ball instead, it holds one offset for
+        // good, through turning and walking both.
+        let (mut doll, c, rest, mut w) = rig();
+        let dt = 1.0 / 120.0;
+        let (root, butt) = (c.tail[0], c.spine[0]);
+        for _ in 0..600 {
+            w.advance(dt, 0.0, 0.0);
+            w.pose(&mut doll, &c, &rest);
+            doll.step(dt);
+        }
+        let off = doll.particles[root].pos.sub(doll.particles[butt].pos);
+        // Two different claims, tested apart. The pose puts the root exactly on
+        // the butt plus its offset, every time - no easing, no lag. After the
+        // step the butt can have moved by up to one step's worth of its own
+        // motion, and the root is corrected at the next pose; that residual is
+        // real but sub-pixel, so it is bounded rather than required to be zero.
+        let mut placed_err = 0.0f32;
+        let mut step_err = 0.0f32;
+        for (moving, turning) in [(0.0, 1.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)] {
+            for _ in 0..240 {
+                w.advance(dt, moving, turning);
+                w.pose(&mut doll, &c, &rest);
+                let now = doll.particles[root].pos.sub(doll.particles[butt].pos);
+                placed_err = placed_err.max(now.sub(off).length());
+                doll.step(dt);
+                let after = doll.particles[root].pos.sub(doll.particles[butt].pos);
+                step_err = step_err.max(after.sub(off).length());
+            }
+        }
+        assert!(
+            placed_err < 1e-3,
+            "the pose does not place the root on the rump: {placed_err:.3} units off"
+        );
+        // 1.5 body units is three quarters of a surface pixel at the default
+        // zoom: past the eye, and it is corrected on the next frame.
+        assert!(
+            step_err < 1.5,
+            "the root lags the rump by {step_err:.2} units after a step"
         );
     }
 
