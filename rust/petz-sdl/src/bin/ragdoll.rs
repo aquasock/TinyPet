@@ -32,7 +32,7 @@ use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
 use petz_core::project::{Body, Projected, Vec3 as WVec3, View};
 use petz_core::shade::{Light, Ramp, Vec3};
 use petz_core::{
-    draw_curve_on_sphere, draw_disc, draw_disc_on_sphere, draw_flat_disc, draw_ring, DepthBuffer, Paint,
+    draw_disc, draw_disc_on_sphere, draw_flat_disc, draw_ring, DepthBuffer, Paint,
     Palette, SpanTable, Surface,
 };
 use std::fs;
@@ -67,7 +67,9 @@ const DIAG_OUTLINE: u8 = 249;
 const BODY: u8 = 0;
 const LIGHT: u8 = 10;
 const DARK: u8 = 0;
-/// The nose, for this diagnostic set: a clear pink against the black coat.
+/// The nose, for this diagnostic set: a clear pink against the black coat. No
+/// longer the nose ball's colour: the ball is back, and the mouth is painted on
+/// the blue muzzle in the palette's black instead.
 const PINK: u8 = 70;
 /// Ball 5, the muzzle: a bright blue with enough of a family in the palette to
 /// shade. Pure blue (252) has two entries and comes out flat, like the sclera
@@ -102,33 +104,49 @@ const EAR_TIP_SINK: f32 = 0.20;
 /// is 1.0; the tail is deliberately looser so the chain can stretch and whip.
 const TAIL_LINK: f32 = 0.12;
 
-/// The mouth: a thin line painted onto the muzzle's own sphere, the way the
-/// pupil is painted onto the sclera - a texture, not a ball.
+/// The mouth: a drawing of the flipped mouth - a stem from under the nose,
+/// splitting into two arms that sweep out and flatten - painted onto the muzzle's
+/// own sphere the way the pupil is painted onto the sclera. A texture, not a
+/// ball.
 ///
-/// `MOUTH_WIDTH` is its length and `MOUTH_THICK` its thickness, both in body
-/// units; at the default zoom of 0.5, 14 and 2 come out as a 7 px line one pixel
-/// thick. `MOUTH_DROP` is how far below the sphere's centre it sits, as a
-/// fraction of the muzzle's radius, and it is at the snout's limit: at 0.85 the
-/// line's lower edge is on the muzzle's own rim, and further down the rim is what
-/// is clipping it, so the pixels stop changing.
-const MOUTH_WIDTH: f32 = 18.0;
-const MOUTH_THICK: f32 = 2.0;
-const MOUTH_DROP: f32 = 0.85;
+/// It is the fourth form of the mouth and the second one to be an image: the
+/// hand-built curve, then a nose-whiskers-mouth sheet, and now the mouth alone,
+/// with the nose back where it was as its own ball.
+///
+/// `MOUTH_SPAN` is the drawing's width in body units. The height follows from the
+/// image's own aspect, so it is never stretched, and the asset is cropped to its
+/// ink, so this is the size of the mark and not of the canvas it was drawn on.
+const MOUTH_SPAN: f32 = 22.0;
 
-/// How far the mouth curls above its own line, in body units: the two humps of a
-/// cartoon cat's mouth. Positive is upwards, which is the direction with room -
-/// the marking's lower edge is already on the snout's rim.
-const MOUTH_CURL: f32 = 3.0;
+/// How far the drawing's **bottom edge** is lifted above the muzzle's lower rim,
+/// as a fraction of that radius.
+///
+/// The drawing is placed by its bottom edge, not by its centre. Its fork is its
+/// top row, so lifting the bottom edge a little leaves the fork just under the
+/// nose and the arms hanging between it and the chin. Centring the box instead
+/// put the fork on the nose - the fault this replaced.
+///
+/// Zero puts the arms on the muzzle's silhouette, where the rim clips them; the
+/// useful range is a small positive lift.
+const MOUTH_RIM_GAP: f32 = 0.0;
 
-/// The mouth's colour: black on this palette, the same entry the retail iris
-/// uses for a pupil, and green under `PETZ_DIAG` so it can be found in a dump
-/// instead of disappearing into a black coat.
+/// Never let the drawing's width fall below this fraction of its full span. A
+/// flat texture turned exactly side-on has no width at all, and a sliver is
+/// closer to what the snout should show there than nothing is.
+const MOUTH_MIN_TURN: f32 = 0.18;
+
+/// A source pixel counts as ink at or above this coverage.
+const MOUTH_INK: u8 = 128;
+
+/// The mouth's colour: black, the entry the retail iris uses for a pupil. It is
+/// painted on the blue muzzle, so it reads without needing a diagnostic colour.
+/// Under `PETZ_DIAG` it is green instead, so it can be found in a pixel dump.
 const MOUTH: u8 = 244;
 const DIAG_MOUTH: u8 = 250;
 
-/// How far in front of the muzzle's own surface the mouth is drawn, in world
-/// units. Small: enough to beat the snout it is painted on, not enough to win
-/// against anything genuinely in front of it.
+/// How far in front of the surface it is painted on the mouth is drawn, in world
+/// units. Small: enough to beat the snout under it, not enough to win against
+/// anything genuinely in front of it.
 const MOUTH_BIAS: f32 = -0.9;
 
 /// The claw ball's radius. Small enough that four of them across a foot's toe
@@ -222,6 +240,59 @@ fn load_table() -> SpanTable {
     )
 }
 
+/// A drawing painted onto a ball's surface, compiled into the binary. There is no
+/// decoder and no asset path at runtime by design: `tools/make-marking.py` does
+/// the conversion once, and the format is a magic, a size, and a coverage byte
+/// per pixel.
+struct Decal {
+    w: f32,
+    h: f32,
+    cov: &'static [u8],
+}
+
+fn load_mouth() -> Decal {
+    let raw: &'static [u8] = include_bytes!("../../assets/mouth.raw");
+    assert_eq!(&raw[0..4], b"MKNG", "mouth asset: bad magic");
+    let w = u16::from_le_bytes([raw[4], raw[5]]) as usize;
+    let h = u16::from_le_bytes([raw[6], raw[7]]) as usize;
+    assert_eq!(raw.len(), 8 + w * h, "mouth asset: size mismatch");
+    Decal { w: w as f32, h: h as f32, cov: &raw[8..] }
+}
+
+impl Decal {
+    fn at(&self, x: i32, y: i32) -> u8 {
+        if x < 0 || y < 0 || x >= self.w as i32 || y >= self.h as i32 {
+            return 0;
+        }
+        self.cov[y as usize * self.w as usize + x as usize]
+    }
+
+    /// The strongest source pixel under one destination pixel's footprint.
+    ///
+    /// Max, not mean. The drawing is minified several times and a stroke is a
+    /// couple of source pixels thick: averaged, a thin line falls under any
+    /// sensible threshold and arrives broken. Taking the strongest source pixel
+    /// keeps a thin stroke as one destination pixel, which is what line art wants
+    /// when it is shrunk.
+    fn sample(&self, u0: f32, v0: f32, u1: f32, v1: f32) -> u8 {
+        let (x0, y0) = (u0.floor() as i32, v0.floor() as i32);
+        let (x1, y1) = (u1.ceil() as i32, v1.ceil() as i32);
+        let mut best = 0u8;
+        for y in y0..y1.max(y0 + 1) {
+            for x in x0..x1.max(x0 + 1) {
+                let c = self.at(x, y);
+                if c > best {
+                    best = c;
+                    if best == 255 {
+                        return 255;
+                    }
+                }
+            }
+        }
+        best
+    }
+}
+
 fn load_palette() -> Palette {
     let raw = fs::read(repo_root().join("evidence/ball/ball-input.raw"))
         .expect("evidence/ball/ball-input.raw");
@@ -269,6 +340,8 @@ struct Creature {
     skull: usize,
     /// The muzzle: the sphere the mouth is painted onto.
     muzzle: usize,
+    /// The nose ball. The mouth is placed from where it lands on screen.
+    nose: usize,
     /// The sclera of each eye, for the visibility test.
     eyes: Vec<usize>,
     /// The ear balls: (base, tip, side sign).
@@ -334,7 +407,8 @@ fn build() -> (Ragdoll, Creature) {
     // Out on the tip, clear of the muzzle's own sphere. Closer in it counts as
     // *inside* the muzzle and the containment rule hides it, which is what
     // swallowed the black tip.
-    // The nose rides on the muzzle, so it moves with it.
+    // The nose rides on the muzzle, so it moves with it. It is a ball and not
+    // part of the mouth texture: the texture is the mouth alone.
     let nose = r.add(Particle::new(422.0, base_y - 20.0, 5.0, PINK));
     r.particles[nose].no_rim = true;
     r.link(neck, skull);
@@ -540,7 +614,9 @@ fn build() -> (Ragdoll, Creature) {
     head.extend(ear_balls.iter().map(|&(b, _, _)| b));
     head.extend(ear_balls.iter().map(|&(_, t, _)| t));
     head.extend(eyes);
-    (r, Creature { spine, legs, head, tail, skull, muzzle, eye_overlays: overlay_pairs, eyes: eye_list, ears: ear_balls, eye_parts, head_balls })
+    (r, Creature { spine, legs, head, tail, skull, muzzle, nose,
+                   eye_overlays: overlay_pairs, eyes: eye_list, ears: ear_balls,
+                   eye_parts, head_balls })
 }
 
 /// The walking controller: owns the clock, the world position, and the pose.
@@ -578,14 +654,12 @@ struct Walker {
     eye_lift: f32,
     /// Last movement input, so the pose knows whether to animate a gait.
     moving: f32,
-    /// The mouth line's length and thickness in body units, and how far below
-    /// the muzzle's centre it sits as a fraction of that radius. The length is
-    /// live while it is being judged; the thickness is not, because at this
-    /// zoom the only choices are one pixel and two.
-    mouth_width: f32,
-    mouth_thick: f32,
-    mouth_curl: f32,
-    mouth_drop: f32,
+    /// The mouth drawing's width in body units, and how far its bottom edge is
+    /// lifted above the muzzle's lower rim as a fraction of that radius. Both
+    /// live while they are being judged; the rest of it - its height, its shape -
+    /// comes from the image, so neither is a number to tune.
+    mouth_span: f32,
+    mouth_rim_gap: f32,
 }
 
 /// Fastest the animal's body can turn, in radians per second.
@@ -658,22 +732,14 @@ impl Walker {
             moving: 1.0,
             // Headless instruments, like PETZ_ZOOM: the mouth can be swept
             // without a window or a keyboard.
-            mouth_width: std::env::var("PETZ_MOUTH")
+            mouth_span: std::env::var("PETZ_MOUTH")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(MOUTH_WIDTH),
-            mouth_thick: std::env::var("PETZ_MOUTH_THICK")
+                .unwrap_or(MOUTH_SPAN),
+            mouth_rim_gap: std::env::var("PETZ_MOUTH_GAP")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(MOUTH_THICK),
-            mouth_curl: std::env::var("PETZ_MOUTH_CURL")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(MOUTH_CURL),
-            mouth_drop: std::env::var("PETZ_MOUTH_DROP")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(MOUTH_DROP),
+                .unwrap_or(MOUTH_RIM_GAP),
         }
     }
 
@@ -933,20 +999,25 @@ fn measure(doll: &Ragdoll, c: &Creature) -> Pose {
     Pose { spine, head, legs, hip_to_knee, knee_to_foot }
 }
 
-/// Where the mouth's centre sits, in screen units from the muzzle's centre, and
-/// whether the marking is on the half of that sphere facing the viewer.
+/// How far the mouth's centre sits from the muzzle's centre across the screen,
+/// and whether the marking is on the half of that sphere facing the viewer.
 ///
 /// The mouth is a marking on the front of the snout, so its body-space direction
-/// is (forward, 0, -`drop`) and its screen offset is that direction projected.
-/// The horizontal part is `sin(heading)`, which is what slides the mouth from the
-/// middle of the muzzle when the animal faces the camera out to the rim in
-/// profile. Dividing by the direction's length keeps the centre on the sphere
-/// whatever the drop is.
+/// is forward, and the horizontal part of that direction projected is
+/// `sin(heading)`. That is what slides the mouth from the middle of the muzzle
+/// when the animal faces the camera out to the rim in profile.
 ///
-/// The cull is not an optimisation. A disc drawn on a sphere takes that sphere's
-/// *near* surface for its depth, so a marking pointing away from the viewer would
-/// paint straight through the snout and appear on the wrong side of the head.
-fn mouth_offset(heading: f32, radius: f32, drop: f32) -> Option<(f32, f32)> {
+/// Only the horizontal term is used. Vertically the drawing is not placed by its
+/// centre at all - it is placed by its **bottom edge**, which sits on the muzzle's
+/// own lower rim (see `MOUTH_RIM_GAP`). Centre-placement is what put the fork on
+/// the nose: the box was centred on the snout, so a drawing whose fork is its top
+/// row had that row half a box above where the mouth should start.
+///
+/// The cull is not an optimisation. A drawing laid over a sphere takes that
+/// sphere's *near* surface for its depth, so a marking pointing away from the
+/// viewer would paint straight through the snout and appear on the wrong side of
+/// the head.
+fn mouth_slide(heading: f32, radius: f32) -> Option<f32> {
     // The tolerance is not cosmetic: exactly side-on, `cos` is a rounding error
     // either side of zero, so a bare `> 0.0` shows the mouth facing one way and
     // hides it facing the other. At the profile the marking is on the rim and
@@ -954,8 +1025,28 @@ fn mouth_offset(heading: f32, radius: f32, drop: f32) -> Option<(f32, f32)> {
     if heading.cos() > 1e-3 {
         return None;
     }
-    let n = (1.0 + drop * drop).sqrt();
-    Some((radius * heading.sin() / n, radius * drop / n))
+    Some(radius * heading.sin())
+}
+
+/// The drawing's extent on the muzzle, as angles: where its fork sits below the
+/// viewer's axis, and its half-width and half-height in radians.
+///
+/// The fork is anchored, not the bottom edge. Anchoring the bottom edge is
+/// impossible once the drawing wraps, because the rim is where the surface turns
+/// edge-on: a fixed angular height measured up from there would push the fork far
+/// down the snout. Anchoring the fork keeps it where the approved placement put it,
+/// and the bottom lands a fraction of a pixel short of the rim by itself.
+///
+/// `half_h` is `asin` of the half-width in radii, which is exactly the arc that
+/// projects to that width - so the mouth keeps the size it was approved at - and
+/// `half_v` follows from the image's aspect in *angle*, so the arms are not
+/// stretched against the fork. That proportional step is the whole reason the
+/// mapping is equidistant.
+fn mouth_extent(wide: f32, tall: f32, re: f32, gap: f32) -> (f32, f32, f32) {
+    let half_h = (wide / (2.0 * re)).clamp(0.0, 1.0).asin();
+    let half_v = half_h * tall / wide;
+    let theta_top = (1.0 - gap - tall / re).clamp(0.0, 1.0).asin();
+    (theta_top, half_h, half_v)
 }
 
 /// Shortest signed difference between two angles, in (-pi, pi].
@@ -1012,8 +1103,8 @@ fn report_eyes(w: &Walker) {
 
 fn report_mouth(w: &Walker) {
     println!(
-        "mouth: length {:.1}  thick {:.1}  curl {:.1}  drop {:.2}",
-        w.mouth_width, w.mouth_thick, w.mouth_curl, w.mouth_drop
+        "mouth: span {:.1}  rim gap {:.2}",
+        w.mouth_span, w.mouth_rim_gap
     );
 }
 
@@ -1021,8 +1112,8 @@ fn report_mouth(w: &Walker) {
 /// without going back to the terminal that started the app.
 fn show_mouth(canvas: &mut sdl2::render::Canvas<sdl2::video::Window>, w: &Walker) {
     let _ = canvas.window_mut().set_title(&format!(
-        "petz ragdoll sandbox - mouth length {:.1} curl {:.1} drop {:.2}",
-        w.mouth_width, w.mouth_curl, w.mouth_drop
+        "petz ragdoll sandbox - mouth span {:.1} gap {:.2}",
+        w.mouth_span, w.mouth_rim_gap
     ));
 }
 
@@ -1143,6 +1234,7 @@ fn main() -> Result<(), String> {
 
     let table = load_table();
     let palette = load_palette();
+    let mouth = load_mouth();
 
     let mut steps = 6usize;
     let mut ramps: HashMap<u8, Ramp> = HashMap::new();
@@ -1177,6 +1269,15 @@ fn main() -> Result<(), String> {
     let mut grab_home = Vec2::new(0.0, 0.0);
     let mut grab_side = 0.0f32;
     let mut view = View::new(25.0, VIEW_GROUND);
+    // Instrument: the view pitch, so a headless run can be framed the way the
+    // owner frames it in the window (`V` steps it 0/15/25/35 and wraps). The
+    // face reads very differently at each, and the dump is the only way to
+    // judge it without a window on someone's desktop.
+    if let Ok(p) = std::env::var("PETZ_PITCH") {
+        if let Ok(deg) = p.parse::<f32>() {
+            view = View::new(deg, VIEW_GROUND);
+        }
+    }
     let zoom: f32 = std::env::var("PETZ_ZOOM")
         .ok()
         .and_then(|v| v.parse::<f32>().ok())
@@ -1212,7 +1313,7 @@ fn main() -> Result<(), String> {
          drag: left mouse   W/S: forward/back   A/D: turn left/right   +/-: speed   V: pitch\n\
          light: arrows   ambience: Z/X   steps: [ ]   texture: T   flex: , .\n\
          (the ear balls are frozen: no keys - see EAR_* in the source)\n\
-         mouth: K/L length, H/J curl, N/M height (values in the title bar)\n\
+         mouth: K/L span, N/M height (values in the title bar)\n\
          Shift+drag: carry the whole animal   G: constraint links\n\
          Tab: ball numbers   P: settings   R: reset   Space: pause   Esc: quit"
     );
@@ -1313,36 +1414,27 @@ fn main() -> Result<(), String> {
                         report_mouth(&walker);
                     }
                     // The mouth, live while its size and height are judged:
-                    // radius first, then how far down the snout it sits. The
+                    // span first, then how far down the snout it sits. The
                     // values are in the title bar until they are settled and the
-                    // keys go.
+                    // keys go. There is no curl key any more - the shape is the
+                    // image's.
                     sdl2::keyboard::Keycode::K => {
-                        walker.mouth_width = (walker.mouth_width - 2.0).max(2.0);
+                        walker.mouth_span = (walker.mouth_span - 2.0).max(6.0);
                         report_mouth(&walker);
                         show_mouth(&mut canvas, &walker);
                     }
                     sdl2::keyboard::Keycode::L => {
-                        walker.mouth_width = (walker.mouth_width + 2.0).min(30.0);
-                        report_mouth(&walker);
-                        show_mouth(&mut canvas, &walker);
-                    }
-                    sdl2::keyboard::Keycode::J => {
-                        walker.mouth_curl = (walker.mouth_curl - 0.5).min(12.0);
-                        report_mouth(&walker);
-                        show_mouth(&mut canvas, &walker);
-                    }
-                    sdl2::keyboard::Keycode::H => {
-                        walker.mouth_curl = (walker.mouth_curl + 0.5).min(12.0);
+                        walker.mouth_span = (walker.mouth_span + 2.0).min(60.0);
                         report_mouth(&walker);
                         show_mouth(&mut canvas, &walker);
                     }
                     sdl2::keyboard::Keycode::N => {
-                        walker.mouth_drop = (walker.mouth_drop - 0.05).max(-0.8);
+                        walker.mouth_rim_gap = (walker.mouth_rim_gap - 0.02).max(-0.4);
                         report_mouth(&walker);
                         show_mouth(&mut canvas, &walker);
                     }
                     sdl2::keyboard::Keycode::M => {
-                        walker.mouth_drop = (walker.mouth_drop + 0.05).min(1.5);
+                        walker.mouth_rim_gap = (walker.mouth_rim_gap + 0.02).min(1.2);
                         report_mouth(&walker);
                         show_mouth(&mut canvas, &walker);
                     }
@@ -1742,70 +1834,123 @@ fn main() -> Result<(), String> {
                 Paint::Shaded { light, pattern: &lpat }, &lid_keep);
         }
 
-        // ---- the mouth: a disc painted onto the muzzle ----------------------
-        // The pupil's trick applied to the snout. Its depth comes from the
-        // muzzle's sphere rather than a sphere of its own, so it lies on the
-        // surface instead of sinking into it, and the muzzle's rim clips it, so
-        // it goes round the side of the snout instead of floating off it.
+        // ---- the mouth: a drawing wrapped onto the muzzle's surface ----------
+        // The drawing is placed by its edges, as approved, but it is no longer a
+        // flat rectangle: every pixel of the ball asks where it sits on the
+        // sphere and looks the drawing up by that *angle*. So the arms curve
+        // round the snout and compress towards the rim instead of lying across
+        // the disc like a decal.
         {
             let m = creature.muzzle;
             let mp = &doll.particles[m];
             let mh = walker.facing.get(m).copied().unwrap_or(heading);
-            // Round exactly as the ball was drawn, or the mouth's sphere is a
+            // Round exactly as the ball was drawn, or the reference sphere is a
             // fraction smaller than the muzzle's and the muzzle's own surface
-            // wins the depth test everywhere but the middle - which is what
-            // happened: a 4 px mouth came out as two pixels.
+            // wins the depth test across the whole mouth.
             let re = (mp.radius * zoom).round().max(1.0);
             // The centre the muzzle was *drawn* at, not the projected one: the
-            // ball rasterizer rounds its centre to whole pixels and solves its
-            // surface from there. A reference sphere half a pixel away has a
-            // surface up to a unit off, which is enough to beat the bias and
-            // let the muzzle draw over the mouth everywhere but the middle.
+            // ball rasterizer rounds a centre to whole pixels and solves its
+            // surface from there, and half a pixel of disagreement is enough to
+            // let the snout draw over the mouth.
             let (cx, cy) = (screen[m].x.round() + 0.5, screen[m].y.round() + 0.5);
             let de = screen[m].depth;
-            let off = mouth_offset(mh, re, walker.mouth_drop);
-            if let Some((ox, oy)) = off {
-                let inside = {
-                    let (cx0, cy0, re0) = (cx, cy, re);
-                    move |x: i32, y: i32| -> bool {
-                        let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-                        (fx - cx0).powi(2) + (fy - cy0).powi(2) <= re0 * re0
+            let full = (walker.mouth_span * zoom).max(1.0);
+            // Width at this heading: a marking turned away from the viewer
+            // narrows, and never quite to nothing.
+            let wide = (full * mh.cos().abs().max(MOUTH_MIN_TURN)).max(1.0);
+            let tall = (full * mouth.h / mouth.w).max(1.0);
+            if mouth_slide(mh, re).is_some() {
+                // The camera's own axes, orthonormal and lined up with the
+                // screen, so a unit sphere here is the circle the ball was drawn
+                // as. Right is world x; the other two follow the view pitch.
+                let (sp, cp) = (view.pitch.sin(), view.pitch.cos());
+                let right_c = WVec3::new(1.0, 0.0, 0.0);
+                let up_c = WVec3::new(0.0, -sp, cp);
+                let toward_c = WVec3::new(0.0, -cp, -sp);
+                // The drawing's vertical extent, as angles down from the viewer's
+                // axis. Its bottom edge sits on the muzzle's lower rim - the
+                // approved placement - and its top edge the drawing's own height
+                // above that. Angles rather than pixels, because on the sphere
+                // the two are not proportional.
+                // The drawing's horizontal extent, as an angle. `asin` of the
+                // half-width in radii is exactly the arc that projects to it, so
+                // the mouth keeps the width it was approved at.
+                let gap = walker.mouth_rim_gap.clamp(-0.5, 0.9);
+                let (theta_top, half_h, half_v) = mouth_extent(wide, tall, re, gap);
+                if half_v > 1e-4 {
+                    let theta_c = theta_top + half_v;
+                    // The decal's centre: `theta_c` down from the viewer's axis,
+                    // then slid sideways by the heading so it travels from the
+                    // middle of the snout to its rim as the head turns.
+                    let base = toward_c.mul(theta_c.cos()).sub(up_c.mul(theta_c.sin()));
+                    let slide = mh.sin();
+                    let c = base.add(right_c.mul(slide)).normalised();
+                    // A degenerate frame would mean the decal is exactly at the
+                    // rim with no surface left to lie on.
+                    if c.dot(toward_c) > 1e-3 {
+                        let right_t = right_c.sub(c.mul(right_c.dot(c))).normalised();
+                        if right_t.length() > 0.5 {
+                            let up_t = c.cross(right_t);
+                            let reach = re.ceil() as i32 + 1;
+                            for dy in -reach..=reach {
+                                let y = cy.round() as i32 + dy;
+                                if y < 0 || y as usize >= H {
+                                    continue;
+                                }
+                                for dx in -reach..=reach {
+                                    let x = cx.round() as i32 + dx;
+                                    if x < 0 || x as usize >= W {
+                                        continue;
+                                    }
+                                    // Position within the drawn circle, in radii.
+                                    let pu = (x as f32 + 0.5 - cx) / re;
+                                    let pv = (cy - (y as f32 + 0.5)) / re;
+                                    let rr = pu * pu + pv * pv;
+                                    if rr > 1.0 {
+                                        continue;
+                                    }
+                                    // The surface normal here: a unit sphere in
+                                    // the camera's frame, so `w` is how far this
+                                    // pixel faces the viewer.
+                                    let w = (1.0 - rr).sqrt();
+                                    let n = right_c.mul(pu).add(up_c.mul(pv)).add(toward_c.mul(w));
+                                    // Angular distance from the decal's centre,
+                                    // and the direction it lies in. Equidistant:
+                                    // radii on the ball are angles, so the
+                                    // drawing's proportions survive the wrap.
+                                    let dn = n.dot(c).clamp(-1.0, 1.0);
+                                    let away = dn.acos();
+                                    if away > half_h.max(half_v) {
+                                        continue;
+                                    }
+                                    let phi = n.dot(up_t).atan2(n.dot(right_t));
+                                    let ax = away * phi.cos();
+                                    let ay = away * phi.sin();
+                                    if ax.abs() > half_h || ay.abs() > half_v {
+                                        continue;
+                                    }
+                                    // Where that lands in the drawing. `ay` is up
+                                    // and rows run down, so the vertical term is
+                                    // inverted.
+                                    let tu = (0.5 + ax / (2.0 * half_h)) * mouth.w;
+                                    let tv = (0.5 - ay / (2.0 * half_v)) * mouth.h;
+                                    let cov = mouth.sample(
+                                        tu - 0.75, tv - 0.75, tu + 0.75, tv + 0.75,
+                                    );
+                                    if cov < MOUTH_INK {
+                                        continue;
+                                    }
+                                    // The ball's own surface: `de` at its centre,
+                                    // less the sphere's dome at this offset.
+                                    let z = de - w * re + MOUTH_BIAS;
+                                    if depth.test_and_set(x as usize, y as usize, z) {
+                                        surface.set(x as usize, y as usize, mouth_col);
+                                    }
+                                }
+                            }
+                        }
                     }
-                };
-                // The mouth is a curve, so it is drawn a column at a time
-                // rather than as a disc with rows clipped away - a disc's span
-                // narrows at its top and bottom, which would cut the curve off
-                // exactly where it leaves the middle. Two humps out of the
-                // marking's own line, returning to it at both ends: the shape of
-                // a cat's mouth drawn in three strokes.
-                let half = (walker.mouth_width * zoom / 2.0).max(1.0);
-                let amp = walker.mouth_curl * zoom;
-                let thick = (walker.mouth_thick * zoom).round().max(1.0);
-                let my = cy + oy;
-                // Sampled outwards from the mouth's own column so the two halves
-                // are mirror images. Measured from the projected centre the
-                // columns straddle it by half a pixel, and one end of the curve
-                // comes out a row lower than the other.
-                //
-                // The curve is built upwards from the marking's line, because
-                // that line's lower edge is already on the snout's rim: two
-                // humps either side of the middle, returning to the line at the
-                // ends. The ends fall outside the muzzle's circle at that height
-                // and are clipped away, which is what leaves two arcs.
-                // The column whose centre is nearest the projected centre: the
-                // rasterizer works in pixel centres, at half-pixel offsets.
-                let mid = (cx + ox - 0.5).round() as i32;
-                let reach = half.round() as i32;
-                let curve = move |x: i32| -> f32 {
-                    let u = ((x - mid) as f32 / half).clamp(-1.0, 1.0);
-                    my - amp * (std::f32::consts::PI * u).sin().abs()
-                };
-                draw_curve_on_sphere(
-                    &mut surface, &mut depth,
-                    mid - reach, mid + reach,
-                    &curve, thick / 2.0,
-                    cx, cy, re, de, MOUTH_BIAS, mouth_col, &inside,
-                );
+                }
             }
         }
 
@@ -2745,36 +2890,76 @@ mod walk_tests {
 
     #[test]
     fn the_mouth_is_painted_on_the_half_of_the_snout_that_faces_the_viewer() {
-        // The mouth is a marking on the front of the snout, not a ball: it is a
-        // disc of the muzzle's own surface. Two things follow, and both are
-        // asserted here because both are easy to get wrong silently.
-        let (r, d) = (6.5f32, MOUTH_DROP);
-        // Facing the camera, it sits under the middle of the muzzle.
-        let (x, y) = mouth_offset(std::f32::consts::PI, r, d).expect("no mouth facing the camera");
-        assert!(x.abs() < 0.01, "the mouth is off-centre facing the camera: x {x}");
-        assert!(y > 0.0 && y < r, "the mouth is not below the centre: y {y}");
-        // In profile it has slid to the front of the snout. With no drop that is
-        // the rim exactly; with the default drop it is a little short of it,
-        // because the marking is on the sphere and not on its equator - which is
-        // the point of dividing by the direction's length.
-        let (x, y) = mouth_offset(std::f32::consts::FRAC_PI_2, r, 0.0).expect("no mouth in profile");
-        assert!((x - r).abs() < 1e-4 && y.abs() < 1e-4, "level profile mouth is at ({x}, {y})");
-        let (x, _) = mouth_offset(std::f32::consts::FRAC_PI_2, r, d).expect("no mouth in profile");
-        assert!(x > 0.5 * r && x < r, "the mouth has not moved to the front of the snout: x {x}");
-        let (x, _) = mouth_offset(-std::f32::consts::FRAC_PI_2, r, d).expect("no mouth in profile");
-        assert!(x < -0.5 * r && x > -r, "the mouth has not moved to the front on the other side: x {x}");
-        // Facing away, there is nothing to paint: a disc takes the near surface
-        // for its depth, so drawing it would put it on the back of the head.
-        assert!(mouth_offset(0.0, r, d).is_none(), "the mouth shows through the skull");
-        // And the centre stays on the sphere at any drop, rather than floating
-        // off it as the marking is moved up or down the snout.
-        for drop in [0.0f32, 0.45, 1.0, 2.0, -0.8] {
-            let (x, y) = mouth_offset(std::f32::consts::PI, 1.0, drop).unwrap();
-            assert!(
-                (x * x + y * y).sqrt() <= 1.0 + 1e-5,
-                "drop {drop} puts the mouth off the sphere: ({x}, {y})"
-            );
+        // The mouth is a marking on the front of the snout, not a ball. Three
+        // things follow, and all are asserted here because all are easy to get
+        // wrong silently.
+        let r = 6.5f32;
+        // Facing the camera it is centred across the snout: the slide is zero at
+        // both faces-camera headings.
+        for facing in [std::f32::consts::PI, -std::f32::consts::PI] {
+            let ox = mouth_slide(facing, r).expect("no mouth facing the camera");
+            assert!(ox.abs() < 1e-3, "the mouth is off-centre facing the camera: x {ox}");
         }
+        // In profile it has slid to the rim, either way round.
+        let right = mouth_slide(std::f32::consts::FRAC_PI_2, r).expect("no mouth in profile");
+        assert!((right - r).abs() < 1e-4, "profile mouth is not on the rim: x {right}");
+        let left = mouth_slide(-std::f32::consts::FRAC_PI_2, r).expect("no mouth in profile");
+        assert!((left + r).abs() < 1e-4, "profile mouth is not on the other rim: x {left}");
+        // Facing away, there is nothing to paint: the drawing takes the near
+        // surface for its depth, so drawing it would put it on the back of the
+        // head.
+        assert!(mouth_slide(0.0, r).is_none(), "the mouth shows through the skull");
+    }
+
+    #[test]
+    fn the_mouth_is_wrapped_without_being_distorted() {
+        // The drawing lies on the sphere, so it must both (a) keep the size it
+        // was approved at and (b) keep its proportions - a tangent-plane mapping
+        // inflates towards the edges, which is what made the arms look longer
+        // than the fork on earlier attempts.
+        let (re, wide, tall) = (6.5f32, 11.0f32, 5.68f32);
+        let (theta_top, half_h, half_v) = mouth_extent(wide, tall, re, 0.0);
+        // The width still projects to what it was approved at: the half-width in
+        // radii is `sin` of the half-angle.
+        let projected_half = re * half_h.sin();
+        assert!(
+            (projected_half - wide / 2.0).abs() < 1e-3,
+            "the wrapped mouth does not keep its width: {projected_half} vs {}",
+            wide / 2.0
+        );
+        // And the proportions are preserved in angle, which is what "equidistant"
+        // buys: the aspect of the extent equals the aspect of the drawing.
+        let aspect = half_v / half_h;
+        let drawing = tall / wide;
+        assert!(
+            (aspect - drawing).abs() < 1e-5,
+            "the wrap distorts the drawing: extent aspect {aspect}, drawing {drawing}"
+        );
+        // The fork lands where the unwrapped placement put it: `theta_top` is the
+        // angle whose projection is the fork's old offset from the centre.
+        let fork_offset = re * theta_top.sin();
+        assert!(
+            (fork_offset - (re - tall)).abs() < 0.05,
+            "the fork is not where it was approved: {fork_offset} vs {}",
+            re - tall
+        );
+        // The arms reach nearly to the rim, but not past it - past it the surface
+        // has turned away and there is nothing to paint on.
+        let bottom = theta_top + 2.0 * half_v;
+        assert!(bottom < std::f32::consts::FRAC_PI_2, "the wrapping runs over the rim");
+        assert!(bottom > 1.0, "the wrapping stops short of the rim: {bottom} rad");
+    }
+
+    #[test]
+    fn the_nose_is_ahead_of_the_muzzle_and_slightly_above_it() {
+        // The nose is real geometry, and the mouth hangs below it on the snout.
+        // `pos.y` is measured down from the ground line, so the nose's smaller
+        // `pos.y` is *higher* in body space. Getting that backwards once put the
+        // mouth at the wrong end of the snout, so it is pinned here.
+        let muzzle = Particle::new(408.0, 100.0, 13.0, 0);
+        let nose = Particle::new(422.0, 96.0, 5.0, 0);
+        assert!(nose.pos.x > muzzle.pos.x, "the nose is not in front of the muzzle");
+        assert!(nose.pos.y < muzzle.pos.y, "the nose is not above the muzzle");
     }
 
     #[test]

@@ -49,8 +49,8 @@ draw every constraint as a line, **`W`/`S` forward and back**, **`A`/`D` turn le
 (hold, not toggle; `Q`/`E` are the same), `+`/`-` speed, `V` view pitch, arrows
 move the light, `Z`/`X` ambience, `[`/`]` ramp steps, `T` texture, `,`/`.` spine
 flex, `Tab` ball numbers, `P` print settings, `R` reset, `Space` pause, `Esc`
-quit. `K`/`L` lengthen the mouth, `H`/`J` change its curl and `N`/`M` move it up
-and down the snout; the values are in the title bar while they are being judged.
+quit. `K`/`L` set the mouth's span and `N`/`M` move it up and down the snout;
+the values are in the title bar while they are being judged.
 
 The **ear balls** have no live controls either. They were tuned from the
 keyboard - four pairs, `B` switching between the bases and the tips - and the
@@ -124,10 +124,10 @@ is asserted as a regression test.
   ear at this fidelity but cannot flop. See "The ears" below.
 - **The ear tip is a cap, not a flop.** It follows the base rigidly because it
   is pinned with it. Nothing here gives an ear its own swing.
-- **The mouth is a small curve.** Two humps painted on the muzzle's sphere, in
-  the right place and clipped by the snout. At this size it is 9 px wide and 3 px
-  deep, and cannot be much more: the muzzle is 7 px in radius on screen. No
-  expression yet - no tongue, no open or closed state.
+- **The mouth is an image on the snout.** A stem from under the nose splitting
+  into two arms, painted on the muzzle's sphere - 11 px wide at the default zoom,
+  nearly as tall as it is wide. The nose is a ball again. No expression yet - no
+  tongue, no open or closed state.
 - **Eyelids are removed.** Petz has no lid geometry — it parameterises one with
   `[Eyelid Color]` plus per-eye "eyelid height" and "eyelid tilt". Our lid-ball
   approximation was visible above the eye and read as a small ear.
@@ -415,80 +415,91 @@ thing to check against a capture.
 ## The mouth
 
 Asked for as "like the iris of the eye: a texture mapped to the snout" - a small
-black circle first, then a thin line, now a curve. It is a texture in every
-version, not a ball: painted onto the muzzle's own sphere, so its depth is that
-sphere's surface per pixel and the muzzle's own circle clips it. The marking lies
-*on* the snout instead of sinking into it or floating over it.
+black circle, a thin line, a curve, that curve flipped, a nose-and-whiskers
+sheet, then a drawing of the mouth alone. It is a texture in every version, not a
+ball, and it is now mapped onto the muzzle's **surface**: every pixel of the ball
+asks where it sits on the sphere and looks the drawing up by that angle.
 
-A straight line could be a disc with everything but one band of rows clipped away.
-A curve cannot: a disc's span narrows towards its top and bottom, so the clipping
-would cut the curve off exactly where it leaves the middle. So the renderer grew
-one primitive, `draw_curve_on_sphere`, which walks columns, takes the row from the
-caller, and solves the depth from the reference sphere per pixel.
+The drawing is mouth-1: a narrow fork on its top row, opening into two arms that
+sweep down and flatten. The pink nose ball is a ball, as it always was. The body
+is 48 balls, 11 on the head.
 
 ```
-MOUTH_WIDTH  18.0   body units; 9 px at the default zoom
-MOUTH_THICK   2.0   body units; one pixel
-MOUTH_CURL    6.0   body units; the humps rise 3 px above the line
-MOUTH_DROP    0.85  below the muzzle's centre, as a fraction of its radius
-MOUTH_BIAS   -0.9   world units in front of the snout's surface
+MOUTH_SPAN      22.0  body units wide at the projection; 11 px at the default zoom
+MOUTH_RIM_GAP    0.0  lift of the fork's reference position off the approved line
+MOUTH_INK      128    source coverage at or above this counts as ink
+MOUTH_MIN_TURN   0.18 floor on horizontal foreshortening, so profile is a sliver
+MOUTH_BIAS      -0.9  world units in front of the surface it is painted on
 ```
 
-The curve is two humps out of the marking's own line, returning to it at both
-ends: `y = line - curl * |sin(pi * u)|`. It is built *upwards* from the line
-because that line's lower edge is already on the snout's rim; the ends fall
-outside the muzzle's circle at that height and the rim clips them, which is what
-leaves two arcs rather than a wave.
+**How the wrap works.** For each pixel inside the ball's drawn circle the
+half-width in radii `(u, v)` gives the surface normal `(u, v, sqrt(1 - u^2 - v^2))`
+in the camera's own axes. `away = acos(n · centre)` is the angular distance from
+the decal's centre and `phi = atan2(n · up, n · right)` its direction, so `ax` and
+`ay` are angles on the ball. Those index the drawing. Depth is the pixel's own
+sphere surface, not the centre's.
 
-Placement is a direction in body space - forward, and `MOUTH_DROP` below the
-sphere's centre - projected the way the pupil's is. Facing the camera the mouth
-sits under the middle of the muzzle with its centre hanging lowest. In profile it
-has slid to the front rim and the snout clips it to a stub. Facing away it is
-culled, and the cull is not an optimisation: a disc drawn on a sphere takes that
-sphere's *near* surface for its depth, so a marking pointing away from the viewer
-would paint straight through the snout.
+**The fork is anchored, the bottom edge is not.** The approved placement put the
+drawing's bottom edge on the muzzle's lower rim, and that cannot survive wrapping:
+the rim is where the surface turns edge-on, so a fixed angular height measured up
+from it would push the fork far down the snout. Anchoring the **fork** - the top
+row - keeps it exactly where the approved placement had it, and the bottom lands a
+fraction of a pixel short of the rim by itself. Measured under `PETZ_DIAG` at 180,
+150, 120 and 90 degrees, the drawing's top row is 1-2 px below the nose's bottom
+row at every heading.
 
-**The snout is the limit.** The muzzle is 13 body units in radius - 7 px on screen
-- and at the height of the mouth its circle is only 7.5 px wide, with the nose
-taking the middle 5 units above it. A two-hump curve is legible here at 9 px wide
-and 3 px of rise, and not much beyond that: the humps already meet the nose's
-lower corners, and a wider mouth runs into the rim.
+**Two things keep it undistorted**, and both are tested:
 
-A genuinely big cartoon mouth needs a bigger muzzle, which is a change to the
-body rather than to the marking. That was offered and **declined** by the owner,
-so the numbers above stand: the face's proportions are what the hand-authored
-skeleton gives, and making them facts - loading a real `.pet` - is a separate
-piece of work.
+- `half_h = asin(wide / 2r)` is exactly the arc that projects to the approved
+  width, so the mouth is not resized by being wrapped.
+- `half_v = half_h * h / w` carries the image's aspect into *angle*, so the arms
+  are not stretched against the fork. The earlier `atan2(lateral, forward)` form
+  was a tangent-plane projection, which inflates towards the edges - that is what
+  made the arms come out longer than the fork on the first wrapping attempt.
 
-Three faults it took to get from "draws nothing" to "draws at all", all worth
-keeping:
+The cost of wrapping honestly: the drawing's outer rows sit further round the
+ball, so they foreshorten more than its middle. The arms therefore reach slightly
+narrower than the unwrapped width - 9 px against 11 at the default zoom - which is
+the sphere behaving correctly, not a bug.
 
-- **The reference sphere must be the one the ball was actually drawn from.** The
-  rasterizer rounds a ball's centre to whole pixels and solves its surface from
-  there. A reference centre half a pixel away has a surface up to a unit off -
-  more than the bias - so the muzzle drew over the mouth everywhere but its
-  middle. A 4 px circle came out as two pixels.
-- **The radius must be rounded the same way.** The muzzle is 6.5 px before
-  rounding and 7 as drawn; using 6.5 as the reference disagreed with the drawn
-  ball in the same way. Both now round identically, and the bias alone decides.
-- **A stroke's rows are picked by count, not by distance.** A curve that lands on
-  a pixel boundary is "within half a pixel" of two rows, and one that lands on a
-  pixel centre is within half a pixel of none under a strict test. Counting rows
-  outwards from the nearest one gives one row for a one-pixel stroke every time.
+**The asset is compiled in, not loaded.** `petz-core` has no dependencies and the
+sandbox has no image decoder, so `tools/make-marking.py` converts the PNG once
+into a coverage grid - magic, width, height, then one byte per pixel - and
+`include_bytes!` puts it in the binary. The converter **crops to the ink** first,
+so the span refers to the mark and not to the canvas it was drawn on: mouth-1 is
+31x16.
 
-And one about sampling: the curve is laid out from the column whose centre is
-nearest the mouth's own centre, at half-pixel offsets. Measured from the
-projected centre instead, the columns straddle it and one end of the curve comes
-out a row lower than the other.
+**The top 10% of the bitmap is blanked.** With the fork anchored where it belongs,
+the drawing's first rows reached into the pink nose and clipped it. Lowering the
+mouth was not available - the bottom is already at the muzzle's rim - so the top
+two rows of sixteen are blanked instead. Blanking rather than cropping is
+deliberate: the renderer anchors the drawing by its top row, so cropping would move
+the whole mark, while blanking keeps the height, the anchor and therefore the
+position. Measured at the default zoom, facing the camera, the gap under the nose
+goes from -1 px (overlapping) to +1 px, and stays 0 to +2 px across 180, 160, 140,
+120 and 90 degrees. Regenerate with
+`tools/make-marking.py assets/mouth.png assets/mouth.raw --trim-top=10`.
 
-Measured under `PETZ_DIAG`, where the mouth paints green: 9-10 px across facing
-the camera, 8 at 135 degrees, 5 at 120 and in profile either way, none facing
-away. `K`/`L` lengthen it, `H`/`J` change the curl, `N`/`M` move it, `P` and the
-title bar report all three, and `PETZ_MOUTH` / `PETZ_MOUTH_CURL` /
-`PETZ_MOUTH_DROP` do the same headlessly for a sweep.
+**Max, not mean, when sampling.** The drawing is minified several times and a
+stroke is a couple of source pixels thick. Averaged, a thin line falls under any
+sensible threshold and arrives broken. Taking the strongest source pixel under a
+destination pixel's footprint keeps a thin stroke as one destination pixel.
 
-What it is not, yet: expression. The shape is a mouth; the tongue and the eyelid
-states are the rest of the face work.
+The colour is the palette's black - the entry the retail iris uses for a pupil -
+and green under `PETZ_DIAG`, so it can be found in a pixel dump.
+
+`K`/`L` set the span, `N`/`M` the fork gap, `P` and the title bar report both, and
+`PETZ_MOUTH` / `PETZ_MOUTH_GAP` do the same headlessly.
+
+**Rejected on the way here, and why.** Anchoring the decal's centre to the nose's
+projected position tracked the nose exactly - 5.0 px below it at every heading -
+but put the mouth on the nose. Deriving the centre from a body-space angle down
+the snout made the offset drift ten pixels against the nose across a quarter turn.
+Both were placement faults, not mapping faults, and both are recorded because the
+distinction cost three attempts.
+
+What it is not, yet: expression. The mouth is one fixed drawing; the tongue and
+the eyelid states are the rest of the face work.
 
 ## Reference findings worth keeping
 

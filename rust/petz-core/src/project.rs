@@ -52,6 +52,36 @@ impl Vec3 {
     pub fn length(self) -> f32 {
         (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
     }
+
+    #[inline]
+    pub fn mul(self, k: f32) -> Vec3 {
+        Vec3::new(self.x * k, self.y * k, self.z * k)
+    }
+
+    #[inline]
+    pub fn dot(self, o: Vec3) -> f32 {
+        self.x * o.x + self.y * o.y + self.z * o.z
+    }
+
+    #[inline]
+    pub fn cross(self, o: Vec3) -> Vec3 {
+        Vec3::new(
+            self.y * o.z - self.z * o.y,
+            self.z * o.x - self.x * o.z,
+            self.x * o.y - self.y * o.x,
+        )
+    }
+
+    /// Unit length, or the zero vector if there is no direction to normalise.
+    #[inline]
+    pub fn normalised(self) -> Vec3 {
+        let len = self.length();
+        if len > 1e-6 {
+            self.mul(1.0 / len)
+        } else {
+            Vec3::default()
+        }
+    }
 }
 
 /// A screen position plus the depth used for draw ordering.
@@ -195,6 +225,16 @@ mod tests {
         assert!((xs[2].0 - 100.0).abs() < 0.01, "quarter turn should face +x");
         assert!((xs[4].0).abs() < 0.01, "half turn returns to the axis");
         assert!((xs[6].0 + 100.0).abs() < 0.01, "three-quarter turn faces -x");
+    }
+
+    #[test]
+    fn vec_products_behave() {
+        let (a, b) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+        assert!((a.dot(b)).abs() < 1e-6, "orthogonal axes dot to zero");
+        let c = a.cross(b);
+        assert!(c.sub(Vec3::new(0.0, 0.0, 1.0)).length() < 1e-6, "x cross y is z");
+        assert!((Vec3::new(3.0, 0.0, 4.0).normalised().length() - 1.0).abs() < 1e-6);
+        assert_eq!(Vec3::default().normalised(), Vec3::default(), "no direction stays zero");
     }
 
     #[test]

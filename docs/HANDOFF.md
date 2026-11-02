@@ -6,15 +6,22 @@ Read this as orientation, not law. Refresh live state (`git status`, `git log`,
 
 ## State
 
-- **The animal is a soft body of 48 balls**: spine 0-3, head 4-6, ears 7-10,
-  eyes 11-14, four legs 15-42 (hip, knee, foot, four claws each), tail 43-47.
+- **The animal is a soft body of 48 balls**: spine 0-3, head 4-6 (skull, muzzle,
+  nose), ears 7-10, eyes 11-14, four legs 15-42 (hip, knee, foot, four claws
+  each), tail 43-47.
 - **Walking works** - `W`/`S` forward and back, `A`/`D` turn. There is no
   animation beyond the gait: the ears are rigidly placed and the tail is physics
   only.
 - **The surface is 320x240**, the animal at half its authored size, in two window
   modes.
-- **The face has a nose and a mouth.** The mouth is a *texture on the muzzle*, not
-  a ball: two humps, painted the way the pupil is painted on the sclera.
+- **The face has a nose and a mouth.** The nose is a pink ball on the snout's
+  tip, as it always was. The mouth is a *drawing* mapped onto the muzzle's
+  the muzzle's **surface** - every pixel asks where it sits on the sphere and
+  looks the drawing up by that angle, so the arms curve round the snout. A
+  drawing, not a ball. Its **fork** is anchored just under the nose; anchoring the
+  bottom edge cannot survive wrapping, because the rim is where the surface turns
+  edge-on. The top 10% of the bitmap is blanked - not cropped - to keep its first
+  rows out of the pink nose.
 - Tree clean, `main` level with `origin/main`. (No SHA here on purpose: the commit
   that adds this note moves it.)
 - A ragdoll may still be running from the owner's session (no dump instrument on
@@ -35,12 +42,21 @@ the tail is a physical thing that trails the body, not an animation played at it
 Do not rebuild it without asking. `docs/SANDBOX.md` keeps the numbers so it would
 not have to be rediscovered.
 
-**The mouth, in three passes.** A small black circle, then a thin line, then a
-curve - each one asked for by the owner and judged in the window. The final shape
-is two humps painted onto the muzzle's own sphere with a new core primitive,
-`draw_curve_on_sphere`, which walks columns so the shape is the caller's and the
-depth is still the reference sphere's per pixel. `K`/`L` lengthen it, `H`/`J` curl
-it, `N`/`M` move it, all live.
+**The mouth, in ten passes, two of them reverted.** A small black circle, a thin line, a curve, a
+flip, a supplied nose-and-whiskers sheet, a supplied mouth drawing, and finally
+that drawing re-mapped from a plate over the disc to a decal *on the surface*.
+The sheet was reverted on the owner's call: it duplicated a nose the ball already
+drew. Two earlier passes were wrapped and reverted, and both failed for the same reason:
+a placement fault dressed up as a mapping fault. One anchored the centre to the
+nose's projected position - it tracked the nose exactly, 5.0 px below it at every
+heading, but put the mouth on the nose. The other derived the centre from a
+body-space angle, which drifted ten pixels against the nose across a quarter turn.
+The placement was then fixed separately (the box was being centred when it should
+have been anchored by an edge), and only then did the wrap land: angular
+(equidistant) mapping, `half_h = asin(wide/2r)` so the approved width is kept,
+`half_v` by aspect so nothing stretches, and the **fork** anchored instead of the
+bottom edge. `tools/make-marking.py` turns a PNG into a coverage grid compiled into
+the binary, cropping to the ink first. `K`/`L` set the span, `N`/`M` the tilt.
 
 **A readout and an input fix came and went with the sway**: the digit font grew
 letters for `GAIN`/`RATE`, and tuning keys were made to ignore auto-repeat after
@@ -57,10 +73,17 @@ holding `K` walked a value to its bound. The text path went when the sway did; t
 - Tail liveliness, degrees of travel after a turn ends: 75 with the tail's own
   damping against 20 damped like the body - the chain answering the body with
   nothing driving it.
-- The mouth, counted under `PETZ_DIAG` where it paints green: 9-10 px across
-  facing the camera, 8 at 135 degrees, 5 at 120 and in profile either way, none
-  facing away. `the_mouth_is_painted_on_the_half_of_the_snout_that_faces_the_viewer`
-  pins the placement; `draw_curve_on_sphere` has two core tests.
+- The mouth: `cargo test --workspace` is 72 green. The drawing's own shape is
+  judged by eye in the window, not by a pixel count. What the dump does confirm
+  are the placement and the absence of distortion: under `PETZ_DIAG` at 180, 150,
+  120 and 90 degrees the drawing's top row is 1-2 px below the nose's bottom row at
+  every heading, and `the_mouth_is_wrapped_without_being_distorted` pins that the
+  wrapped mouth keeps its approved width, keeps the image's aspect in *angle*, and
+  that the wrap stops short of the rim.
+  `the_mouth_is_painted_on_the_half_of_the_snout_that_faces_the_viewer` pins the
+  frame, the cull and that a steeper tilt sits lower; `draw_curve_on_sphere`
+  keeps its two core tests even though the face no longer calls it.
+- Ball count, from the count test: 48, of which 11 on the head.
 - Hips, measured against a rigid body through a full-rate turn: 0.2-1.1 px, and
   the hip-to-spine gap fixed at its authored 20 units.
 - **Not verified by eye**: `PETZ_MODE=low` since the ear links and the spine
@@ -72,10 +95,20 @@ holding `K` walked a value to its bound. The text path went when the sway did; t
   white feet change between frames 25 seconds apart, so it is a steady-state
   solver artifact rather than settling. Found while checking that the tail was
   still; untouched.
-- **The mouth is at the snout's size limit.** 7 px of radius on screen gives 7.5 px
-  of width at the mouth's height, and the humps already meet the nose's lower
-  corners. A bigger cartoon mouth needs a bigger muzzle - the owner was offered
-  that and passed on it.
+- **The mouth has almost no snout to sit on.** At the default 25 degree pitch
+  the nose ball projects to the *bottom* of the muzzle (y 187 of a 163-190
+  snout), because facing the camera its forward offset points at the viewer and
+  looking down puts nearer things lower on screen. There are about 2 px of
+  visible muzzle under the nose, so the arms sweep around the nose instead of
+  sitting under it. Moving the nose up the snout is the fix if that ever matters.
+- **The mouth is a stub in profile.** At a 90 degree turn the drawing slides to
+  the muzzle's rim and the snout clips most of it away. Correct for a mark on a
+  13-unit sphere, but a bigger mouth needs a bigger muzzle. Offered once and
+  declined.
+- **The mouth is fitted by eye.** `MOUTH_SPAN` and `MOUTH_RIM_GAP` were set by
+  rendering and looking at 25 degrees; if the face reads wrong, those two
+  constants are where to turn. `PETZ_MOUTH` / `PETZ_MOUTH_GAP` sweep it
+  headlessly, and `PETZ_PITCH` frames it at any view angle.
 
 ## Decisions a fresh session must not re-litigate
 
@@ -137,11 +170,14 @@ would make the face's scale a fact rather than a guess.
   `,`/`.` spine flex, `Tab` ball numbers, `G` constraint overlay, `P` print
   settings, `R` reset, `Space` pause, `Esc` quit, `Shift`+drag carry the animal,
   plain drag poke one ball.
-- Mouth, live while it is being judged: `K`/`L` length, `H`/`J` curl, `N`/`M`
-  height on the snout. `P` and the window title report all three.
+- Mouth, live while it is being judged: `K`/`L` span, `N`/`M` tilt down the
+  snout. `P` and the window title report both. There is no curl key - the shape
+  is the drawing's.
 - Instruments: `PETZ_HEADING=<deg>` pins the facing, `PETZ_DUMP_PPM=1` writes
   `/tmp/ours.ppm`, `PETZ_SWEEP=<rad/s>` rotates steadily, `PETZ_DIAG=1` paints the
-  diagnostic colours, `PETZ_MOUTH` / `PETZ_MOUTH_CURL` / `PETZ_MOUTH_DROP` set the
-  mouth headlessly for a sweep. Dump pixel counts; do not trust a window grab.
+  diagnostic colours, `PETZ_MOUTH` / `PETZ_MOUTH_GAP` set the mouth headlessly
+  for a sweep, and `PETZ_PITCH` frames it at any view angle. Dump pixels rather
+  than grabbing the window; the mouth's shape is judged by eye, since it is an
+  image and not a curve.
 - Watch for stale instances: several ragdolls at once all write `/tmp/ours.ppm`,
   which silently corrupts any measurement. `pgrep -x ragdoll` first.
