@@ -108,13 +108,19 @@ pub struct View {
 
 impl Default for View {
     fn default() -> Self {
-        Self { pitch: 0.0, ground: 218.0 }
+        Self {
+            pitch: 0.0,
+            ground: 218.0,
+        }
     }
 }
 
 impl View {
     pub fn new(pitch_degrees: f32, ground: f32) -> Self {
-        Self { pitch: pitch_degrees.to_radians(), ground }
+        Self {
+            pitch: pitch_degrees.to_radians(),
+            ground,
+        }
     }
 
     pub fn project(&self, p: Vec3) -> Projected {
@@ -190,8 +196,14 @@ mod tests {
     fn a_level_view_is_the_old_side_on_geometry() {
         // Side-on: heading right, no view pitch. A point 40 px left and 68 px
         // up must land exactly where the 2D walker put it.
-        let view = View { pitch: 0.0, ground: 218.0 };
-        let body = Body { pos: Vec3::new(500.0, 0.0, 0.0), heading: std::f32::consts::FRAC_PI_2 };
+        let view = View {
+            pitch: 0.0,
+            ground: 218.0,
+        };
+        let body = Body {
+            pos: Vec3::new(500.0, 0.0, 0.0),
+            heading: std::f32::consts::FRAC_PI_2,
+        };
         let world = body.to_world(40.0, 0.0, 68.0);
         let p = view.project(world);
         assert!((p.x - 540.0).abs() < 0.01, "x is {}", p.x);
@@ -201,10 +213,18 @@ mod tests {
     #[test]
     fn walking_away_moves_up_the_screen() {
         let view = View::new(25.0, 218.0);
-        let body = Body { pos: Vec3::new(320.0, 0.0, 0.0), heading: 0.0 };
+        let body = Body {
+            pos: Vec3::new(320.0, 0.0, 0.0),
+            heading: 0.0,
+        };
         let near = view.project(body.to_world(0.0, 0.0, 0.0));
         let far = view.project(body.to_world(0.0, 0.0, 0.0).add(Vec3::new(0.0, 200.0, 0.0)));
-        assert!(far.y < near.y, "far point should be higher: {} vs {}", far.y, near.y);
+        assert!(
+            far.y < near.y,
+            "far point should be higher: {} vs {}",
+            far.y,
+            near.y
+        );
         assert!(far.depth > near.depth, "far point should be deeper");
         // Orthographic: distance does not shrink anything.
         assert_eq!(near.x, far.x);
@@ -213,7 +233,10 @@ mod tests {
     #[test]
     fn a_turning_body_sweeps_a_circle() {
         let view = View::default();
-        let mut body = Body { pos: Vec3::new(0.0, 0.0, 0.0), heading: 0.0 };
+        let mut body = Body {
+            pos: Vec3::new(0.0, 0.0, 0.0),
+            heading: 0.0,
+        };
         let mut xs = Vec::new();
         for i in 0..8 {
             body.heading = i as f32 * std::f32::consts::FRAC_PI_4;
@@ -222,9 +245,15 @@ mod tests {
         }
         // Heading 0 faces +y (depth), quarter turns go right, back, left.
         assert!(xs[0].0.abs() < 0.01, "facing away should not move x");
-        assert!((xs[2].0 - 100.0).abs() < 0.01, "quarter turn should face +x");
+        assert!(
+            (xs[2].0 - 100.0).abs() < 0.01,
+            "quarter turn should face +x"
+        );
         assert!((xs[4].0).abs() < 0.01, "half turn returns to the axis");
-        assert!((xs[6].0 + 100.0).abs() < 0.01, "three-quarter turn faces -x");
+        assert!(
+            (xs[6].0 + 100.0).abs() < 0.01,
+            "three-quarter turn faces -x"
+        );
     }
 
     #[test]
@@ -232,17 +261,30 @@ mod tests {
         let (a, b) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
         assert!((a.dot(b)).abs() < 1e-6, "orthogonal axes dot to zero");
         let c = a.cross(b);
-        assert!(c.sub(Vec3::new(0.0, 0.0, 1.0)).length() < 1e-6, "x cross y is z");
+        assert!(
+            c.sub(Vec3::new(0.0, 0.0, 1.0)).length() < 1e-6,
+            "x cross y is z"
+        );
         assert!((Vec3::new(3.0, 0.0, 4.0).normalised().length() - 1.0).abs() < 1e-6);
-        assert_eq!(Vec3::default().normalised(), Vec3::default(), "no direction stays zero");
+        assert_eq!(
+            Vec3::default().normalised(),
+            Vec3::default(),
+            "no direction stays zero"
+        );
     }
 
     #[test]
     fn lateral_offset_is_perpendicular_to_forward() {
-        let body = Body { pos: Vec3::default(), heading: 1.0 };
+        let body = Body {
+            pos: Vec3::default(),
+            heading: 1.0,
+        };
         let f = body.to_world(1.0, 0.0, 0.0);
         let r = body.to_world(0.0, 1.0, 0.0);
-        assert!((f.x * r.x + f.y * r.y + f.z * r.z).abs() < 1e-4, "axes are not perpendicular");
+        assert!(
+            (f.x * r.x + f.y * r.y + f.z * r.z).abs() < 1e-4,
+            "axes are not perpendicular"
+        );
     }
 
     #[test]
@@ -252,8 +294,10 @@ mod tests {
             for (wy, wz) in [(0.0f32, 0.0f32), (100.0, 50.0), (-40.0, 68.0)] {
                 let p = view.project(Vec3::new(0.0, wy, wz));
                 let (y, z) = view.unproject(p.y, p.depth);
-                assert!((y - wy).abs() < 0.01 && (z - wz).abs() < 0.01,
-                        "pitch {pitch}: ({y},{z}) != ({wy},{wz})");
+                assert!(
+                    (y - wy).abs() < 0.01 && (z - wz).abs() < 0.01,
+                    "pitch {pitch}: ({y},{z}) != ({wy},{wz})"
+                );
             }
         }
     }

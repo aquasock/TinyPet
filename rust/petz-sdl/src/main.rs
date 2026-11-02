@@ -61,16 +61,27 @@ fn load_animation(path: &PathBuf) -> Animation {
             let colour = b[p + 8];
             let kind = b[p + 9];
             p += 12;
-            balls.push(Ball { cx, cy, w, colour, kind });
+            balls.push(Ball {
+                cx,
+                cy,
+                w,
+                colour,
+                kind,
+            });
         }
         frames.push(balls);
     }
-    Animation { width, height, frames }
+    Animation {
+        width,
+        height,
+        frames,
+    }
 }
 
 fn load_table() -> SpanTable {
-    SpanTable::new(fs::read(repo_root().join("evidence/ball/tables.raw"))
-        .expect("evidence/ball/tables.raw"))
+    SpanTable::new(
+        fs::read(repo_root().join("evidence/ball/tables.raw")).expect("evidence/ball/tables.raw"),
+    )
 }
 
 fn load_palette() -> Palette {
@@ -95,7 +106,9 @@ fn main() -> Result<(), String> {
     let mut frames = anim.frames;
     let (mut maxw, mut maxh) = (1usize, 1usize);
     for f in &frames {
-        if f.is_empty() { continue; }
+        if f.is_empty() {
+            continue;
+        }
         let (mut x0, mut y0, mut x1, mut y1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
         for b in f {
             x0 = x0.min(b.cx - b.w as i32 / 2);
@@ -108,7 +121,9 @@ fn main() -> Result<(), String> {
     }
     let (w, h) = (maxw + 32, maxh + 32);
     for f in &mut frames {
-        if f.is_empty() { continue; }
+        if f.is_empty() {
+            continue;
+        }
         let (mut x0, mut y0, mut x1, mut y1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
         for b in f.iter() {
             x0 = x0.min(b.cx - b.w as i32 / 2);
@@ -116,10 +131,20 @@ fn main() -> Result<(), String> {
             x1 = x1.max(b.cx + b.w as i32 / 2);
             y1 = y1.max(b.cy + b.w as i32 / 2);
         }
-        let (dx, dy) = ((w as i32 - (x1 - x0)) / 2 - x0, (h as i32 - (y1 - y0)) / 2 - y0);
-        for b in f.iter_mut() { b.cx += dx; b.cy += dy; }
+        let (dx, dy) = (
+            (w as i32 - (x1 - x0)) / 2 - x0,
+            (h as i32 - (y1 - y0)) / 2 - y0,
+        );
+        for b in f.iter_mut() {
+            b.cx += dx;
+            b.cy += dy;
+        }
     }
-    let anim = Animation { width: w, height: h, frames };
+    let anim = Animation {
+        width: w,
+        height: h,
+        frames,
+    };
     let table = load_table();
     let palette = load_palette();
     println!("loaded {} frames", anim.frames.len());
@@ -129,7 +154,8 @@ fn main() -> Result<(), String> {
 
     // Largest integer scale that fits the display. Fractional scaling would
     // resample pixels, which defeats the point.
-    let display = video.display_bounds(0)
+    let display = video
+        .display_bounds(0)
         .map(|r| (r.width() as usize, r.height() as usize))
         .unwrap_or((1280, 720));
     let scale = (display.0 / w).min(display.1 / h).max(1);
@@ -160,7 +186,10 @@ fn main() -> Result<(), String> {
         for e in events.poll_iter() {
             match e {
                 sdl2::event::Event::Quit { .. } => break 'outer,
-                sdl2::event::Event::KeyDown { keycode: Some(sdl2::keyboard::Keycode::Escape), .. } => break 'outer,
+                sdl2::event::Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::Escape),
+                    ..
+                } => break 'outer,
                 _ => {}
             }
         }
@@ -172,13 +201,17 @@ fn main() -> Result<(), String> {
                 surface.set(x, y, BACKGROUND);
             }
         }
-        if frame_idx % 60 == 0 { eprintln!("balls this frame: {}", anim.frames[frame_idx].len()); }
+        if frame_idx % 60 == 0 {
+            eprintln!("balls this frame: {}", anim.frames[frame_idx].len());
+        }
         // Outlines are filled discs slightly larger than the body, so they must
         // be laid down first for the body to punch out the middle and leave a
         // rim. Draw order in the captured stream is not reliable for this.
         let frame = &anim.frames[frame_idx];
         for ball in frame.iter().filter(|b| b.kind == 3) {
-            if ball.w == 0 || ball.w > table.max_diameter() { continue; }
+            if ball.w == 0 || ball.w > table.max_diameter() {
+                continue;
+            }
             fill_disc(&mut surface, &table, ball.cx, ball.cy, ball.w, ball.colour);
         }
         for ball in frame.iter().filter(|b| b.kind != 3) {
@@ -188,13 +221,23 @@ fn main() -> Result<(), String> {
             if ball.kind == 0 {
                 // Iris: drawn last over the pupil, so it must be a ring or the
                 // pupil disappears. Hole sized from the pupil record (w-8).
-                petz_core::fill_ring(&mut surface, &table, ball.cx, ball.cy, ball.w, 4, ball.colour);
+                petz_core::fill_ring(
+                    &mut surface,
+                    &table,
+                    ball.cx,
+                    ball.cy,
+                    ball.w,
+                    4,
+                    ball.colour,
+                );
             } else {
                 fill_disc(&mut surface, &table, ball.cx, ball.cy, ball.w, ball.colour);
             }
         }
         let painted = surface.pixels().iter().filter(|&&p| p != 12).count();
-        if frame_idx % 30 == 0 { eprintln!("painted {painted} px on frame {frame_idx}"); }
+        if frame_idx % 30 == 0 {
+            eprintln!("painted {painted} px on frame {frame_idx}");
+        }
         let rgb = palette.to_rgb(&surface);
 
         tex.update(None, &rgb, w * 3).map_err(|e| e.to_string())?;
@@ -202,8 +245,12 @@ fn main() -> Result<(), String> {
         canvas.copy(&tex, None, None).map_err(|e| e.to_string())?;
         canvas.present();
 
-        if pinned.is_none() { frame_idx = (frame_idx + 1) % anim.frames.len(); }
-        if frame_idx % 30 == 0 { eprintln!("frame {frame_idx}"); }
+        if pinned.is_none() {
+            frame_idx = (frame_idx + 1) % anim.frames.len();
+        }
+        if frame_idx % 30 == 0 {
+            eprintln!("frame {frame_idx}");
+        }
 
         // Fixed-rate playback, and a running count in the title.
         let target = Duration::from_millis(1000 / FPS);

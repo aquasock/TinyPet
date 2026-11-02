@@ -88,6 +88,7 @@ build/                  everything generated (gitignored)
 ```sh
 cd rust
 cargo test          # includes the 285/285 ball-silhouette check
+cargo fmt --all --check   # the tree is rustfmt-clean; keep it that way
 cargo run -p petz-headless -- ball
 ```
 

@@ -72,11 +72,19 @@ pub struct Gait {
 impl Gait {
     pub fn walk(spec: GaitSpec) -> Self {
         // Left front, right front, left hind, right hind.
-        Self { spec, phase: 0.0, offsets: [0.0, 0.5, 0.25, 0.75] }
+        Self {
+            spec,
+            phase: 0.0,
+            offsets: [0.0, 0.5, 0.25, 0.75],
+        }
     }
 
     pub fn trot(spec: GaitSpec) -> Self {
-        Self { spec, phase: 0.0, offsets: [0.0, 0.5, 0.5, 0.0] }
+        Self {
+            spec,
+            phase: 0.0,
+            offsets: [0.0, 0.5, 0.5, 0.0],
+        }
     }
 
     pub fn advance(&mut self, dt: f32) {
@@ -107,7 +115,8 @@ impl Gait {
         let vertical = window * travel.sin() * self.spec.flex_vertical;
         // A quarter cycle out of step with the lift: the body rolls onto a side
         // as it rises over it, rather than doing both at once.
-        let lateral = window * (travel + std::f32::consts::FRAC_PI_2).sin() * self.spec.flex_lateral;
+        let lateral =
+            window * (travel + std::f32::consts::FRAC_PI_2).sin() * self.spec.flex_lateral;
         (vertical, lateral)
     }
 
@@ -120,7 +129,11 @@ impl Gait {
             // Stance: slide backwards relative to the body at exactly the
             // speed the body is moving forwards, so the foot stays put.
             let t = local / duty;
-            FootPose { dx: d * 0.5 - d * t, dy: 0.0, planted: true }
+            FootPose {
+                dx: d * 0.5 - d * t,
+                dy: 0.0,
+                planted: true,
+            }
         } else {
             let t = (local - duty) / (1.0 - duty);
             FootPose {
@@ -165,7 +178,13 @@ mod tests {
     use super::*;
 
     fn gait() -> Gait {
-        Gait::walk(GaitSpec { cycle: 1.0, duty: 0.6, speed: 100.0, step_height: 10.0, ..GaitSpec::default() })
+        Gait::walk(GaitSpec {
+            cycle: 1.0,
+            duty: 0.6,
+            speed: 100.0,
+            step_height: 10.0,
+            ..GaitSpec::default()
+        })
     }
 
     #[test]
@@ -231,8 +250,14 @@ mod tests {
         let g = gait();
         let end_a = g.spine_flex(0.0);
         let end_b = g.spine_flex(1.0);
-        assert!(end_a.0.abs() < 1e-4 && end_a.1.abs() < 1e-4, "root moved: {end_a:?}");
-        assert!(end_b.0.abs() < 1e-4 && end_b.1.abs() < 1e-4, "shoulder moved: {end_b:?}");
+        assert!(
+            end_a.0.abs() < 1e-4 && end_a.1.abs() < 1e-4,
+            "root moved: {end_a:?}"
+        );
+        assert!(
+            end_b.0.abs() < 1e-4 && end_b.1.abs() < 1e-4,
+            "shoulder moved: {end_b:?}"
+        );
         // Somewhere through the cycle the middle must be clearly displaced.
         let mut peak: f32 = 0.0;
         let mut g2 = g.clone();
@@ -274,7 +299,10 @@ mod tests {
         let foot = Vec2::new(0.0, 500.0); // far beyond 60 px of leg
         let knee = two_bone_ik(hip, foot, 30.0, 30.0, 1.0);
         let l1 = knee.sub(hip).length();
-        assert!((l1 - 30.0).abs() < 0.01, "bone length changed under clamping: {l1}");
+        assert!(
+            (l1 - 30.0).abs() < 0.01,
+            "bone length changed under clamping: {l1}"
+        );
         assert!(knee.y < 31.0, "knee should stay within the leg's reach");
     }
 
@@ -284,7 +312,10 @@ mod tests {
         let foot = Vec2::new(10.0, 40.0);
         let a = two_bone_ik(hip, foot, 30.0, 30.0, 1.0);
         let b = two_bone_ik(hip, foot, 30.0, 30.0, -1.0);
-        assert!((a.x - b.x).abs() > 1.0, "bend should choose a side: {a:?} {b:?}");
+        assert!(
+            (a.x - b.x).abs() > 1.0,
+            "bend should choose a side: {a:?} {b:?}"
+        );
         // Both solutions are equally valid: same bone lengths, mirrored.
         assert!((a.sub(hip).length() - b.sub(hip).length()).abs() < 1e-3);
     }

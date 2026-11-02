@@ -29,7 +29,11 @@ pub struct Texture {
 impl Texture {
     pub fn new(width: usize, height: usize, pixels: Vec<u8>) -> Self {
         assert_eq!(width * height, pixels.len(), "texture size mismatch");
-        Self { width, height, pixels }
+        Self {
+            width,
+            height,
+            pixels,
+        }
     }
 
     /// A texture that selects nothing, so a patterned ball renders identically
@@ -84,7 +88,9 @@ pub fn shade_disc_pattern(
     light: Light,
     pattern: &Pattern,
 ) {
-    shade_disc_pattern_masked(surface, table, cx, cy, diameter, light, pattern, &|_, _| true)
+    shade_disc_pattern_masked(surface, table, cx, cy, diameter, light, pattern, &|_, _| {
+        true
+    })
 }
 
 /// As `shade_disc_pattern`, but `keep` is asked about every pixel before it is
@@ -142,7 +148,11 @@ pub fn shade_disc_pattern_masked(
                 continue;
             }
             let texel = pattern.texture.sample(u as usize, v as usize);
-            let ramp = if texel >= pattern.threshold { &pattern.base } else { &pattern.alt };
+            let ramp = if texel >= pattern.threshold {
+                &pattern.base
+            } else {
+                &pattern.alt
+            };
 
             let lambert = (dx * light.dir.x + dy * light.dir.y + nz * light.dir.z).max(0.0);
             let t = light.ambient + light.diffuse * lambert;
@@ -162,7 +172,8 @@ pub fn dapple(width: usize, height: usize, seed: u32, cover: u8) -> Texture {
             // Wrap around both axes so the pattern tiles without a seam.
             let u = x as f32 / width as f32 * std::f32::consts::TAU;
             let v = y as f32 / height as f32 * std::f32::consts::TAU;
-            let n = (u.sin() * 1.7 + v.cos() * 1.3
+            let n = (u.sin() * 1.7
+                + v.cos() * 1.3
                 + (u * 2.0 + v).sin() * 0.8
                 + (v * 3.0 - u).cos() * 0.5)
                 * 40.0
@@ -235,7 +246,11 @@ mod tests {
         let mut furred = Surface::new(64, 64);
         shade_disc(&mut plain, &table, 32, 32, 40, &base, light);
         shade_disc_pattern(&mut furred, &table, 32, 32, 40, light, &pattern);
-        assert_eq!(plain.pixels(), furred.pixels(), "a no-op texture must be a no-op");
+        assert_eq!(
+            plain.pixels(),
+            furred.pixels(),
+            "a no-op texture must be a no-op"
+        );
     }
 
     #[test]
@@ -252,10 +267,17 @@ mod tests {
         let mut s = Surface::new(64, 64);
         shade_disc_pattern(&mut s, &table, 32, 32, 40, Light::default(), &pattern);
         let used: Vec<u8> = s.pixels().iter().copied().filter(|c| *c != 0).collect();
-        assert!(used.iter().any(|c| base.indices.contains(c)), "base ramp unused");
-        assert!(used.iter().any(|c| alt.indices.contains(c)), "alt ramp unused");
         assert!(
-            used.iter().all(|c| base.indices.contains(c) || alt.indices.contains(c)),
+            used.iter().any(|c| base.indices.contains(c)),
+            "base ramp unused"
+        );
+        assert!(
+            used.iter().any(|c| alt.indices.contains(c)),
+            "alt ramp unused"
+        );
+        assert!(
+            used.iter()
+                .all(|c| base.indices.contains(c) || alt.indices.contains(c)),
             "a colour escaped both ramps"
         );
     }
@@ -329,8 +351,16 @@ mod tests {
         };
         let mut s = Surface::new(64, 64);
         shade_disc_pattern(&mut s, &table, 32, 32, 40, light, &pattern);
-        let centre = base.indices.iter().position(|&c| c == s.get(32, 32).unwrap()).unwrap();
-        let edge = base.indices.iter().position(|&c| c == s.get(50, 32).unwrap()).unwrap();
+        let centre = base
+            .indices
+            .iter()
+            .position(|&c| c == s.get(32, 32).unwrap())
+            .unwrap();
+        let edge = base
+            .indices
+            .iter()
+            .position(|&c| c == s.get(50, 32).unwrap())
+            .unwrap();
         assert!(centre > edge);
     }
 }

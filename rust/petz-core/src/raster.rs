@@ -31,7 +31,11 @@ pub struct DepthBuffer {
 
 impl DepthBuffer {
     pub fn new(width: usize, height: usize) -> Self {
-        Self { width, height, data: vec![f32::INFINITY; width * height] }
+        Self {
+            width,
+            height,
+            data: vec![f32::INFINITY; width * height],
+        }
     }
 
     pub fn clear(&mut self) {
@@ -137,7 +141,11 @@ pub fn draw_disc(
                 Paint::Shaded { light, pattern } => {
                     let u = ((dx.atan2(nz) * inv_pi) + 0.5 + pattern.phase).rem_euclid(1.0) * tw;
                     let texel = pattern.texture.sample(u as usize, v as usize);
-                    let ramp = if texel >= pattern.threshold { &pattern.base } else { &pattern.alt };
+                    let ramp = if texel >= pattern.threshold {
+                        &pattern.base
+                    } else {
+                        &pattern.alt
+                    };
                     let lambert = (dx * light.dir.x + dy * light.dir.y + nz * light.dir.z).max(0.0);
                     ramp.pick(light.ambient + light.diffuse * lambert)
                 }
@@ -376,11 +384,28 @@ mod tests {
         for order in [true, false] {
             let mut s = Surface::new(64, 64);
             let mut d = DepthBuffer::new(64, 64);
-            let paint = Paint::Shaded { light: Light::default(), pattern: &pattern };
-            let balls = if order { [(near, 200u8), (far, 201u8)] } else { [(far, 201), (near, 200)] };
+            let paint = Paint::Shaded {
+                light: Light::default(),
+                pattern: &pattern,
+            };
+            let balls = if order {
+                [(near, 200u8), (far, 201u8)]
+            } else {
+                [(far, 201), (near, 200)]
+            };
             for (depth, colour) in balls {
-                draw_disc(&mut s, &mut d, &table, 32, 32, 20, depth, 0.0,
-                          Paint::Flat(colour), &|_, _| true);
+                draw_disc(
+                    &mut s,
+                    &mut d,
+                    &table,
+                    32,
+                    32,
+                    20,
+                    depth,
+                    0.0,
+                    Paint::Flat(colour),
+                    &|_, _| true,
+                );
             }
             // Same centre, so the nearer ball covers the middle; the far one
             // survives only as the ring outside the near ball's silhouette.
@@ -394,11 +419,28 @@ mod tests {
         let table = table();
         let mut s = Surface::new(64, 64);
         let mut d = DepthBuffer::new(64, 64);
-        draw_disc(&mut s, &mut d, &table, 32, 32, 40, 0.0, 0.0, Paint::Flat(9), &|_, _| true);
+        draw_disc(
+            &mut s,
+            &mut d,
+            &table,
+            32,
+            32,
+            40,
+            0.0,
+            0.0,
+            Paint::Flat(9),
+            &|_, _| true,
+        );
         let centre = d.get(32, 32);
         let edge = d.get(32, 32 + 18);
-        assert!((centre + 20.0).abs() < 1.0, "centre depth {centre} should be radius in front");
-        assert!(edge > centre, "edge {edge} should be behind centre {centre}");
+        assert!(
+            (centre + 20.0).abs() < 1.0,
+            "centre depth {centre} should be radius in front"
+        );
+        assert!(
+            edge > centre,
+            "edge {edge} should be behind centre {centre}"
+        );
     }
 
     #[test]
@@ -406,8 +448,30 @@ mod tests {
         let table = table();
         let mut s = Surface::new(64, 64);
         let mut d = DepthBuffer::new(64, 64);
-        draw_disc(&mut s, &mut d, &table, 32, 32, 40, 0.0, 0.0, Paint::Flat(1), &|_, _| true);
-        draw_disc(&mut s, &mut d, &table, 32, 32, 40, 0.0, -1.0, Paint::Flat(2), &|_, _| true);
+        draw_disc(
+            &mut s,
+            &mut d,
+            &table,
+            32,
+            32,
+            40,
+            0.0,
+            0.0,
+            Paint::Flat(1),
+            &|_, _| true,
+        );
+        draw_disc(
+            &mut s,
+            &mut d,
+            &table,
+            32,
+            32,
+            40,
+            0.0,
+            -1.0,
+            Paint::Flat(2),
+            &|_, _| true,
+        );
         assert_eq!(s.get(32, 32).unwrap(), 2, "the biased ball should win");
     }
 
@@ -418,8 +482,30 @@ mod tests {
         let table = table();
         let mut s = Surface::new(64, 64);
         let mut d = DepthBuffer::new(64, 64);
-        draw_disc(&mut s, &mut d, &table, 32, 32, 40, 0.0, 0.0, Paint::Flat(1), &|_, _| true);
-        draw_disc(&mut s, &mut d, &table, 36, 32, 10, 0.0, 0.0, Paint::Flat(2), &|_, _| true);
+        draw_disc(
+            &mut s,
+            &mut d,
+            &table,
+            32,
+            32,
+            40,
+            0.0,
+            0.0,
+            Paint::Flat(1),
+            &|_, _| true,
+        );
+        draw_disc(
+            &mut s,
+            &mut d,
+            &table,
+            36,
+            32,
+            10,
+            0.0,
+            0.0,
+            Paint::Flat(2),
+            &|_, _| true,
+        );
         assert_eq!(s.get(36, 32).unwrap(), 1, "the inner ball must not show");
     }
 
@@ -432,15 +518,31 @@ mod tests {
         let mut d = DepthBuffer::new(32, 32);
         let curve = |x: i32| -> f32 { 16.0 + (x as f32 - 16.0).abs() * -0.5 };
         draw_curve_on_sphere(
-            &mut s, &mut d, 10, 22, &curve, 0.5, 16.0, 16.0, 12.0, -100.0, -1.0, 7,
+            &mut s,
+            &mut d,
+            10,
+            22,
+            &curve,
+            0.5,
+            16.0,
+            16.0,
+            12.0,
+            -100.0,
+            -1.0,
+            7,
             &|_, _| true,
         );
         for x in 10..=22 {
             let want = curve(x).round() as i32;
-            let got: Vec<i32> =
-                (0..32usize).filter(|&y| s.get(x as usize, y) == Some(7)).map(|y| y as i32).collect();
+            let got: Vec<i32> = (0..32usize)
+                .filter(|&y| s.get(x as usize, y) == Some(7))
+                .map(|y| y as i32)
+                .collect();
             assert_eq!(got.len(), 1, "column {x} painted {got:?}");
-            assert!((got[0] - want).abs() <= 1, "column {x}: {got:?} vs row {want}");
+            assert!(
+                (got[0] - want).abs() <= 1,
+                "column {x}: {got:?} vs row {want}"
+            );
         }
         // The middle of the curve is the nearest part of it.
         assert!(d.get(16, 16) < d.get(10, 19), "the curve is flat in depth");
@@ -451,7 +553,18 @@ mod tests {
         let mut s = Surface::new(32, 32);
         let mut d = DepthBuffer::new(32, 32);
         draw_curve_on_sphere(
-            &mut s, &mut d, 4, 28, &|_| 16.0, 0.5, 16.0, 16.0, 12.0, -100.0, -1.0, 7,
+            &mut s,
+            &mut d,
+            4,
+            28,
+            &|_| 16.0,
+            0.5,
+            16.0,
+            16.0,
+            12.0,
+            -100.0,
+            -1.0,
+            7,
             &|x, _| x < 16,
         );
         assert_eq!(s.get(15, 16), Some(7));

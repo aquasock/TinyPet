@@ -132,11 +132,21 @@ pub struct Constraint {
 
 impl Constraint {
     pub fn new(a: usize, b: usize, rest: f32) -> Self {
-        Self { a, b, rest, stiffness: 1.0 }
+        Self {
+            a,
+            b,
+            rest,
+            stiffness: 1.0,
+        }
     }
 
     pub fn soft(a: usize, b: usize, rest: f32, stiffness: f32) -> Self {
-        Self { a, b, rest, stiffness }
+        Self {
+            a,
+            b,
+            rest,
+            stiffness,
+        }
     }
 }
 
@@ -272,10 +282,7 @@ impl Ragdoll {
             }
             // How far each end must move to reach `rest`, split by mobility.
             let diff = (len - c.rest) / len * 0.5 * c.stiffness;
-            let (ma, mb) = (
-                !self.particles[a].pinned,
-                !self.particles[b].pinned,
-            );
+            let (ma, mb) = (!self.particles[a].pinned, !self.particles[b].pinned);
             match (ma, mb) {
                 (true, true) => {
                     self.particles[a].pos.x += d.x * diff;
@@ -344,9 +351,15 @@ impl Ragdoll {
                 continue;
             }
             let r = p.radius;
-            if p.pos.x - r < x0 { p.pos.x = x0 + r; }
-            if p.pos.x + r > x1 { p.pos.x = x1 - r; }
-            if p.pos.y - r < y0 { p.pos.y = y0 + r; }
+            if p.pos.x - r < x0 {
+                p.pos.x = x0 + r;
+            }
+            if p.pos.x + r > x1 {
+                p.pos.x = x1 - r;
+            }
+            if p.pos.y - r < y0 {
+                p.pos.y = y0 + r;
+            }
             if p.pos.y + r > y1 {
                 // Landing should bleed energy, or a dropped pet bounces forever.
                 p.pos.y = y1 - r;
@@ -395,7 +408,10 @@ impl Ragdoll {
             .constraints
             .iter()
             .map(|c| {
-                let d = self.particles[c.a].pos.sub(self.particles[c.b].pos).length();
+                let d = self.particles[c.a]
+                    .pos
+                    .sub(self.particles[c.b].pos)
+                    .length();
                 (d - c.rest).abs()
             })
             .sum();
@@ -503,7 +519,10 @@ mod tests {
             r.step(1.0 / 60.0);
         }
         let d = r.particles[a].pos.sub(r.particles[b].pos).length();
-        assert!((d - 10.0).abs() < 0.5, "contact shoved a linked pair to {d}");
+        assert!(
+            (d - 10.0).abs() < 0.5,
+            "contact shoved a linked pair to {d}"
+        );
     }
 
     #[test]
@@ -514,7 +533,10 @@ mod tests {
             for _ in 0..300 {
                 r.step(1.0 / 60.0);
             }
-            r.particles.iter().map(|p| p.pos.x.to_bits()).collect::<Vec<_>>()
+            r.particles
+                .iter()
+                .map(|p| p.pos.x.to_bits())
+                .collect::<Vec<_>>()
         };
         assert_eq!(run(), run());
     }
@@ -567,16 +589,14 @@ mod body_tests {
 
     #[test]
     fn a_held_body_does_not_stretch() {
-        let before: f32 = (0..4)
-            .map(|i| r_dist(&torso(), i))
-            .sum();
+        let before: f32 = (0..4).map(|i| r_dist(&torso(), i)).sum();
         let mut r = torso();
         for _ in 0..240 {
             r.step(1.0 / 120.0);
         }
-        let after: f32 = (0..4).map(|i| {
-            r.particles[i].pos.sub(r.particles[i + 1].pos).length()
-        }).sum();
+        let after: f32 = (0..4)
+            .map(|i| r.particles[i].pos.sub(r.particles[i + 1].pos).length())
+            .sum();
         assert!(
             (after - before).abs() < 2.0,
             "spine changed length {before} -> {after}"

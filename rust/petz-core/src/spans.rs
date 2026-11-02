@@ -22,15 +22,23 @@ impl SpanTable {
     /// Offset of the row-width block for `diameter`.
     #[inline]
     pub fn offset(diameter: usize) -> usize {
-        if diameter == 0 { 0 } else { (diameter - 1) * diameter / 2 }
+        if diameter == 0 {
+            0
+        } else {
+            (diameter - 1) * diameter / 2
+        }
     }
 
     /// Row widths for a disc of `diameter`, top row first.
     pub fn rows(&self, diameter: usize) -> &[u8] {
-        if diameter == 0 { return &[]; }
+        if diameter == 0 {
+            return &[];
+        }
         let start = Self::offset(diameter);
         let end = (start + diameter).min(self.bytes.len());
-        if start >= end { return &[]; }
+        if start >= end {
+            return &[];
+        }
         &self.bytes[start..end]
     }
 
@@ -65,9 +73,13 @@ pub fn fill_disc(
     colour: u8,
 ) {
     for (row, &width) in table.rows(diameter).iter().enumerate() {
-        if width == 0 { continue; }
+        if width == 0 {
+            continue;
+        }
         let (y, left, len) = row_span(cx, cy, diameter, row, width);
-        if y < 0 { continue; }
+        if y < 0 {
+            continue;
+        }
         surface.fill_span(y as usize, left, len, colour);
     }
 }
@@ -163,9 +175,13 @@ pub fn fill_ring(
     let rows = table.rows(diameter);
     let t = thickness.max(1);
     for (row, &width) in rows.iter().enumerate() {
-        if width == 0 { continue; }
+        if width == 0 {
+            continue;
+        }
         let (y, left, len) = row_span(cx, cy, diameter, row, width);
-        if y < 0 { continue; }
+        if y < 0 {
+            continue;
+        }
         let w = len as i32;
         // Top and bottom rows are solid across the span.
         let solid = row < t || row + t >= rows.len() || (w as usize) <= 2 * t;

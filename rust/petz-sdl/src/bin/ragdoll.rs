@@ -28,12 +28,12 @@ use std::time::Instant;
 
 use petz_core::fur::{dapple, stripes, Pattern, Texture};
 use petz_core::gait::{two_bone_ik, Gait, GaitSpec};
-use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
 use petz_core::project::{Body, Projected, Vec3 as WVec3, View};
+use petz_core::ragdoll::{Particle, Ragdoll, Vec2};
 use petz_core::shade::{Light, Ramp, Vec3};
 use petz_core::{
-    draw_disc, draw_disc_on_sphere, draw_flat_disc, draw_ring, DepthBuffer, Paint,
-    Palette, SpanTable, Surface,
+    draw_disc, draw_disc_on_sphere, draw_flat_disc, draw_ring, DepthBuffer, Paint, Palette,
+    SpanTable, Surface,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -159,12 +159,7 @@ const CLAW_RADIUS: f32 = 2.0;
 /// tangent to the foot rather than buried in it, and spread across the toe the
 /// way toes are spread. The outer pair sits further back than the inner pair
 /// for that reason: a paw's toes wrap round the front of it.
-const TOES: [(f32, f32); 4] = [
-    (7.9, -9.0),
-    (11.6, -3.0),
-    (11.6, 3.0),
-    (7.9, 9.0),
-];
+const TOES: [(f32, f32); 4] = [(7.9, -9.0), (11.6, -3.0), (11.6, 3.0), (7.9, 9.0)];
 
 /// How far the front ear is pushed clear of the back one, in depth units.
 ///
@@ -210,7 +205,12 @@ fn draw_number(
     let text = value.max(0).to_string();
     let width = text.len() as i32 * 4 * scale;
     let _ = canvas.set_draw_color(Color::RGB(0, 0, 0));
-    let _ = canvas.fill_rect(Rect::new(x - 5, y - 5, (width + 9) as u32, (5 * scale + 9) as u32));
+    let _ = canvas.fill_rect(Rect::new(
+        x - 5,
+        y - 5,
+        (width + 9) as u32,
+        (5 * scale + 9) as u32,
+    ));
     let _ = canvas.set_draw_color(Color::RGB(255, 255, 255));
     for (i, ch) in text.chars().enumerate() {
         let d = ch.to_digit(10).unwrap_or(0) as usize;
@@ -235,8 +235,7 @@ fn repo_root() -> PathBuf {
 
 fn load_table() -> SpanTable {
     SpanTable::new(
-        fs::read(repo_root().join("evidence/ball/tables.raw"))
-            .expect("evidence/ball/tables.raw"),
+        fs::read(repo_root().join("evidence/ball/tables.raw")).expect("evidence/ball/tables.raw"),
     )
 }
 
@@ -256,7 +255,11 @@ fn load_mouth() -> Decal {
     let w = u16::from_le_bytes([raw[4], raw[5]]) as usize;
     let h = u16::from_le_bytes([raw[6], raw[7]]) as usize;
     assert_eq!(raw.len(), 8 + w * h, "mouth asset: size mismatch");
-    Decal { w: w as f32, h: h as f32, cov: &raw[8..] }
+    Decal {
+        w: w as f32,
+        h: h as f32,
+        cov: &raw[8..],
+    }
 }
 
 impl Decal {
@@ -523,7 +526,11 @@ fn build() -> (Ragdoll, Creature) {
     for (fwd, side, bend) in legs_spec {
         // PETZ_DIAG paints the hips, which are otherwise coat colour and vanish
         // into the body while you are trying to watch them turn.
-        let hip_col = if std::env::var("PETZ_DIAG").is_ok() { 143 } else { BODY };
+        let hip_col = if std::env::var("PETZ_DIAG").is_ok() {
+            143
+        } else {
+            BODY
+        };
         let hip = r.add(Particle::new(fwd, GROUND - 48.0, 15.0, hip_col));
         let knee = r.add(Particle::new(fwd, GROUND - 22.0, 12.0, BODY));
         let foot = r.add(Particle::new(fwd, GROUND, 10.0, LIGHT));
@@ -548,7 +555,11 @@ fn build() -> (Ragdoll, Creature) {
             r.particles[i].side = side;
             r.particles[i].rest_side = side;
         }
-        let attach = if fwd > 300.0 { spine[spine.len() - 2] } else { spine[0] };
+        let attach = if fwd > 300.0 {
+            spine[spine.len() - 2]
+        } else {
+            spine[0]
+        };
         r.link(attach, hip);
         r.link(hip, knee);
         r.link(knee, foot);
@@ -614,9 +625,23 @@ fn build() -> (Ragdoll, Creature) {
     head.extend(ear_balls.iter().map(|&(b, _, _)| b));
     head.extend(ear_balls.iter().map(|&(_, t, _)| t));
     head.extend(eyes);
-    (r, Creature { spine, legs, head, tail, skull, muzzle, nose,
-                   eye_overlays: overlay_pairs, eyes: eye_list, ears: ear_balls,
-                   eye_parts, head_balls })
+    (
+        r,
+        Creature {
+            spine,
+            legs,
+            head,
+            tail,
+            skull,
+            muzzle,
+            nose,
+            eye_overlays: overlay_pairs,
+            eyes: eye_list,
+            ears: ear_balls,
+            eye_parts,
+            head_balls,
+        },
+    )
 }
 
 /// The walking controller: owns the clock, the world position, and the pose.
@@ -673,7 +698,10 @@ impl Walker {
         // Half of the old start: the surface is half the size, so the same spot
         // on screen is half the world coordinates. The skeleton itself is
         // untouched, which is what keeps the animal's detail.
-        let body = Body { pos: WVec3::new(160.0, -260.0, 0.0), heading: 0.42 };
+        let body = Body {
+            pos: WVec3::new(160.0, -260.0, 0.0),
+            heading: 0.42,
+        };
         // Lag by part. The head leads, the body follows, the tail trails - the
         // same overlapping action an animator would key by hand.
         let mut lag = vec![0.28; particles];
@@ -759,7 +787,10 @@ impl Walker {
 
     /// The body transform for one ball, using that ball's own facing.
     fn part(&self, i: usize) -> Body {
-        Body { pos: self.body.pos, heading: self.facing.get(i).copied().unwrap_or(self.heading_body) }
+        Body {
+            pos: self.body.pos,
+            heading: self.facing.get(i).copied().unwrap_or(self.heading_body),
+        }
     }
 
     /// `moving` is +1 forward, -1 backward, 0 standing. `turning` is -1 left,
@@ -774,7 +805,11 @@ impl Walker {
         if moving == 0.0 {
             return;
         }
-        let f = Body { pos: self.body.pos, heading: self.heading_body }.forward();
+        let f = Body {
+            pos: self.body.pos,
+            heading: self.heading_body,
+        }
+        .forward();
         let nx = self.body.pos.x + f.x * self.gait.spec.speed * moving * dt;
         let ny = self.body.pos.y + f.y * self.gait.spec.speed * moving * dt;
         // Stay on the visible ground by stopping, not by turning. Turning is the
@@ -804,9 +839,17 @@ impl Walker {
         let n = creature.spine.len().max(1);
         for (i, &p) in creature.spine.iter().enumerate() {
             let t = i as f32 / (n - 1).max(1) as f32;
-            let (dv, dl) = if walking { self.gait.spine_flex(t) } else { (0.0, 0.0) };
+            let (dv, dl) = if walking {
+                self.gait.spine_flex(t)
+            } else {
+                (0.0, 0.0)
+            };
             // dv is upward, and body y runs down, so it subtracts.
-            doll.drive_to(p, Vec2::new(rest.spine[i].x, rest.spine[i].y + lift - dv), 0.45);
+            doll.drive_to(
+                p,
+                Vec2::new(rest.spine[i].x, rest.spine[i].y + lift - dv),
+                0.45,
+            );
             // Lateral flex is authored rather than solved: the spine's sway is
             // a curve through `side`, which the solver does not model.
             if let Some(part) = doll.particles.get_mut(p) {
@@ -858,9 +901,15 @@ impl Walker {
                 // The *current* distance, not the target's: a spring acting on
                 // positions that have not converged yet pulls the ear off its
                 // target if it is told the target's length instead.
-                let now = doll.particles[base].pos.sub(doll.particles[creature.skull].pos).length();
+                let now = doll.particles[base]
+                    .pos
+                    .sub(doll.particles[creature.skull].pos)
+                    .length();
                 doll.set_rest(creature.skull, base, now);
-                let now = doll.particles[tip].pos.sub(doll.particles[base].pos).length();
+                let now = doll.particles[tip]
+                    .pos
+                    .sub(doll.particles[base].pos)
+                    .length();
                 doll.set_rest(base, tip, now);
             }
         }
@@ -989,14 +1038,30 @@ fn measure(doll: &Ragdoll, c: &Creature) -> Pose {
     let hip_to_knee = c
         .legs
         .iter()
-        .map(|l| doll.particles[l.hip].pos.sub(doll.particles[l.knee].pos).length())
+        .map(|l| {
+            doll.particles[l.hip]
+                .pos
+                .sub(doll.particles[l.knee].pos)
+                .length()
+        })
         .collect();
     let knee_to_foot = c
         .legs
         .iter()
-        .map(|l| doll.particles[l.knee].pos.sub(doll.particles[l.foot].pos).length())
+        .map(|l| {
+            doll.particles[l.knee]
+                .pos
+                .sub(doll.particles[l.foot].pos)
+                .length()
+        })
         .collect();
-    Pose { spine, head, legs, hip_to_knee, knee_to_foot }
+    Pose {
+        spine,
+        head,
+        legs,
+        hip_to_knee,
+        knee_to_foot,
+    }
 }
 
 /// How far the mouth's centre sits from the muzzle's centre across the screen,
@@ -1069,13 +1134,7 @@ fn elevate_light(dir: Vec3, degrees: f32) -> Vec3 {
 /// Is the eye's surface at this pixel in front of the nearest head surface?
 /// Shared by the sphere, the pupil and the lid so all three shells are clipped
 /// against exactly the same thing.
-fn eye_pixel_ok(
-    geo: &[(f32, f32, f32, f32)],
-    x: f32,
-    y: f32,
-    eye_surface: f32,
-    bias: f32,
-) -> bool {
+fn eye_pixel_ok(geo: &[(f32, f32, f32, f32)], x: f32, y: f32, eye_surface: f32, bias: f32) -> bool {
     let mut nearest = f32::INFINITY;
     for &(hx, hy, hr, hd) in geo {
         let d2 = (x - hx).powi(2) + (y - hy).powi(2);
@@ -1126,7 +1185,8 @@ fn report_ears() {
     );
 }
 
-fn report(light: Light, steps: usize, tex: usize, texture: &str) {    let yaw = light.dir.x.atan2(light.dir.z).to_degrees();
+fn report(light: Light, steps: usize, tex: usize, texture: &str) {
+    let yaw = light.dir.x.atan2(light.dir.z).to_degrees();
     let pitch = light.dir.y.asin().to_degrees();
     println!(
         "settings: steps={steps} yaw={yaw:.1} pitch={pitch:.1} ambient={:.2} diffuse={:.2} tex={tex} ({texture})",
@@ -1172,7 +1232,11 @@ fn ear_planes(sk_depth: f32, d: [f32; 4]) -> [f32; 4] {
     let front_is_second = d[2] < d[0];
     let mut planes = [0.0f32; 4];
     for (k, pair) in [(0usize, [0usize, 1usize]), (1, [2, 3])] {
-        let push = if (k == 1) == front_is_second { EAR_FRONT } else { 0.0 };
+        let push = if (k == 1) == front_is_second {
+            EAR_FRONT
+        } else {
+            0.0
+        };
         for j in pair {
             planes[j] = ear_plane(sk_depth, d[j], mean) - push;
         }
@@ -1215,7 +1279,11 @@ fn main() -> Result<(), String> {
         .filter(|n| *n >= 1)
         .unwrap_or(if low_end { 1 } else { 2 });
 
-    let mut builder = video.window("petz ragdoll sandbox", (W * scale) as u32, (H * scale) as u32);
+    let mut builder = video.window(
+        "petz ragdoll sandbox",
+        (W * scale) as u32,
+        (H * scale) as u32,
+    );
     // Where the window lands is not this program's business. It used to centre
     // itself on launch, which moved the window out from under whatever was
     // already there - the sandbox cannot be put beside anything if it relocates
@@ -1294,8 +1362,16 @@ fn main() -> Result<(), String> {
     // Ball numbers, for referring to them. Tab toggles.
     let mut show_ids = true;
     // Diagnostics: red outlines under PETZ_DIAG, so the ear ordering shows up.
-    let outline = if std::env::var("PETZ_DIAG").is_ok() { DIAG_OUTLINE } else { OUTLINE };
-    let mouth_col = if std::env::var("PETZ_DIAG").is_ok() { DIAG_MOUTH } else { MOUTH };
+    let outline = if std::env::var("PETZ_DIAG").is_ok() {
+        DIAG_OUTLINE
+    } else {
+        OUTLINE
+    };
+    let mouth_col = if std::env::var("PETZ_DIAG").is_ok() {
+        DIAG_MOUTH
+    } else {
+        MOUTH
+    };
 
     let mut events = sdl.event_pump()?;
     let mut paused = false;
@@ -1323,140 +1399,157 @@ fn main() -> Result<(), String> {
         for e in events.poll_iter() {
             match e {
                 sdl2::event::Event::Quit { .. } => break 'outer,
-                sdl2::event::Event::KeyDown { keycode: Some(k), repeat: false, .. } => {
+                sdl2::event::Event::KeyDown {
+                    keycode: Some(k),
+                    repeat: false,
+                    ..
+                } => {
                     held.insert(k);
                     match k {
-                    sdl2::keyboard::Keycode::Escape => break 'outer,
-                    sdl2::keyboard::Keycode::R => {
-                        // Rebuilding resets indices as well as pose, so the
-                        // walker is rebuilt to match the new skeleton.
-                        let (d, c) = build();
-                        doll = d;
-                        walker = Walker::new(&c, doll.particles.len());
-                        grabbed = None;
-                    }
-                    sdl2::keyboard::Keycode::Space => paused = !paused,
+                        sdl2::keyboard::Keycode::Escape => break 'outer,
+                        sdl2::keyboard::Keycode::R => {
+                            // Rebuilding resets indices as well as pose, so the
+                            // walker is rebuilt to match the new skeleton.
+                            let (d, c) = build();
+                            doll = d;
+                            walker = Walker::new(&c, doll.particles.len());
+                            grabbed = None;
+                        }
+                        sdl2::keyboard::Keycode::Space => paused = !paused,
 
-                    sdl2::keyboard::Keycode::Comma => {
-                        walker.gait.spec.flex_vertical = (walker.gait.spec.flex_vertical - 0.5).max(0.0);
-                        walker.gait.spec.flex_lateral = (walker.gait.spec.flex_lateral - 0.5).max(0.0);
-                        println!(
-                            "flex v{:.1} l{:.1}",
-                            walker.gait.spec.flex_vertical, walker.gait.spec.flex_lateral
-                        );
-                    }
-                    sdl2::keyboard::Keycode::Period => {
-                        walker.gait.spec.flex_vertical = (walker.gait.spec.flex_vertical + 0.5).min(16.0);
-                        walker.gait.spec.flex_lateral = (walker.gait.spec.flex_lateral + 0.5).min(16.0);
-                        println!(
-                            "flex v{:.1} l{:.1}",
-                            walker.gait.spec.flex_vertical, walker.gait.spec.flex_lateral
-                        );
-                    }
+                        sdl2::keyboard::Keycode::Comma => {
+                            walker.gait.spec.flex_vertical =
+                                (walker.gait.spec.flex_vertical - 0.5).max(0.0);
+                            walker.gait.spec.flex_lateral =
+                                (walker.gait.spec.flex_lateral - 0.5).max(0.0);
+                            println!(
+                                "flex v{:.1} l{:.1}",
+                                walker.gait.spec.flex_vertical, walker.gait.spec.flex_lateral
+                            );
+                        }
+                        sdl2::keyboard::Keycode::Period => {
+                            walker.gait.spec.flex_vertical =
+                                (walker.gait.spec.flex_vertical + 0.5).min(16.0);
+                            walker.gait.spec.flex_lateral =
+                                (walker.gait.spec.flex_lateral + 0.5).min(16.0);
+                            println!(
+                                "flex v{:.1} l{:.1}",
+                                walker.gait.spec.flex_vertical, walker.gait.spec.flex_lateral
+                            );
+                        }
 
-                    sdl2::keyboard::Keycode::V => {
-                        let degrees = [0.0f32, 15.0, 25.0, 35.0];
-                        let now = view.pitch.to_degrees();
-                        let next = degrees.iter().find(|d| **d > now + 0.5).copied().unwrap_or(0.0);
-                        view.pitch = next.to_radians();
-                        println!("view pitch {next:.0} deg");
-                    }
-                    sdl2::keyboard::Keycode::Equals | sdl2::keyboard::Keycode::Plus => {
-                        walker.gait.spec.speed += 15.0;
-                        println!("speed {:.0} px/s", walker.gait.spec.speed);
-                    }
-                    sdl2::keyboard::Keycode::Minus => {
-                        walker.gait.spec.speed = (walker.gait.spec.speed - 15.0).max(0.0);
-                        println!("speed {:.0} px/s", walker.gait.spec.speed);
-                    }
-                    sdl2::keyboard::Keycode::Left => {
-                        light.dir = rotate_light(light.dir, -12.0);
-                        report(light, steps, tex_idx, textures[tex_idx].0);
-                    }
-                    sdl2::keyboard::Keycode::Right => {
-                        light.dir = rotate_light(light.dir, 12.0);
-                        report(light, steps, tex_idx, textures[tex_idx].0);
-                    }
-                    sdl2::keyboard::Keycode::Up => {
-                        light.dir = elevate_light(light.dir, 8.0);
-                        report(light, steps, tex_idx, textures[tex_idx].0);
-                    }
-                    sdl2::keyboard::Keycode::Down => {
-                        light.dir = elevate_light(light.dir, -8.0);
-                        report(light, steps, tex_idx, textures[tex_idx].0);
-                    }
-                    sdl2::keyboard::Keycode::LeftBracket => {
-                        steps = (steps - 1).max(1);
-                        rebuild_ramps(steps, &mut ramps);
-                        report(light, steps, tex_idx, textures[tex_idx].0);
-                    }
-                    sdl2::keyboard::Keycode::RightBracket => {
-                        steps = (steps + 1).min(24);
-                        rebuild_ramps(steps, &mut ramps);
-                        report(light, steps, tex_idx, textures[tex_idx].0);
-                    }
-                    sdl2::keyboard::Keycode::T => {
-                        tex_idx = (tex_idx + 1) % textures.len();
-                        report(light, steps, tex_idx, textures[tex_idx].0);
-                    }
-                    sdl2::keyboard::Keycode::G => {
-                        show_links = !show_links;
-                        println!("constraint links {}", if show_links { "on" } else { "off" });
-                    }
-                    sdl2::keyboard::Keycode::Tab => {
-                        show_ids = !show_ids;
-                        println!("ball numbers {}", if show_ids { "on" } else { "off" });
-                    }
-                    sdl2::keyboard::Keycode::P => {
-                        report(light, steps, tex_idx, textures[tex_idx].0);
-                        report_eyes(&walker);
-                        report_ears();
-                        report_mouth(&walker);
-                    }
-                    // The mouth, live while its size and height are judged:
-                    // span first, then how far down the snout it sits. The
-                    // values are in the title bar until they are settled and the
-                    // keys go. There is no curl key any more - the shape is the
-                    // image's.
-                    sdl2::keyboard::Keycode::K => {
-                        walker.mouth_span = (walker.mouth_span - 2.0).max(6.0);
-                        report_mouth(&walker);
-                        show_mouth(&mut canvas, &walker);
-                    }
-                    sdl2::keyboard::Keycode::L => {
-                        walker.mouth_span = (walker.mouth_span + 2.0).min(60.0);
-                        report_mouth(&walker);
-                        show_mouth(&mut canvas, &walker);
-                    }
-                    sdl2::keyboard::Keycode::N => {
-                        walker.mouth_rim_gap = (walker.mouth_rim_gap - 0.02).max(-0.4);
-                        report_mouth(&walker);
-                        show_mouth(&mut canvas, &walker);
-                    }
-                    sdl2::keyboard::Keycode::M => {
-                        walker.mouth_rim_gap = (walker.mouth_rim_gap + 0.02).min(1.2);
-                        report_mouth(&walker);
-                        show_mouth(&mut canvas, &walker);
-                    }
-                    // Height as an angle round the head's centre, not an offset
-                    // from the ground: raising an ear walks it up the sphere,
-                    // the way its radius and width already do.
-                    sdl2::keyboard::Keycode::Z => {
-                        light.ambient = (light.ambient - 0.05).max(0.0);
-                        report(light, steps, tex_idx, textures[tex_idx].0);
-                    }
-                    sdl2::keyboard::Keycode::X => {
-                        light.ambient = (light.ambient + 0.05).min(0.9);
-                        report(light, steps, tex_idx, textures[tex_idx].0);
-                    }
-                    _ => {}
+                        sdl2::keyboard::Keycode::V => {
+                            let degrees = [0.0f32, 15.0, 25.0, 35.0];
+                            let now = view.pitch.to_degrees();
+                            let next = degrees
+                                .iter()
+                                .find(|d| **d > now + 0.5)
+                                .copied()
+                                .unwrap_or(0.0);
+                            view.pitch = next.to_radians();
+                            println!("view pitch {next:.0} deg");
+                        }
+                        sdl2::keyboard::Keycode::Equals | sdl2::keyboard::Keycode::Plus => {
+                            walker.gait.spec.speed += 15.0;
+                            println!("speed {:.0} px/s", walker.gait.spec.speed);
+                        }
+                        sdl2::keyboard::Keycode::Minus => {
+                            walker.gait.spec.speed = (walker.gait.spec.speed - 15.0).max(0.0);
+                            println!("speed {:.0} px/s", walker.gait.spec.speed);
+                        }
+                        sdl2::keyboard::Keycode::Left => {
+                            light.dir = rotate_light(light.dir, -12.0);
+                            report(light, steps, tex_idx, textures[tex_idx].0);
+                        }
+                        sdl2::keyboard::Keycode::Right => {
+                            light.dir = rotate_light(light.dir, 12.0);
+                            report(light, steps, tex_idx, textures[tex_idx].0);
+                        }
+                        sdl2::keyboard::Keycode::Up => {
+                            light.dir = elevate_light(light.dir, 8.0);
+                            report(light, steps, tex_idx, textures[tex_idx].0);
+                        }
+                        sdl2::keyboard::Keycode::Down => {
+                            light.dir = elevate_light(light.dir, -8.0);
+                            report(light, steps, tex_idx, textures[tex_idx].0);
+                        }
+                        sdl2::keyboard::Keycode::LeftBracket => {
+                            steps = (steps - 1).max(1);
+                            rebuild_ramps(steps, &mut ramps);
+                            report(light, steps, tex_idx, textures[tex_idx].0);
+                        }
+                        sdl2::keyboard::Keycode::RightBracket => {
+                            steps = (steps + 1).min(24);
+                            rebuild_ramps(steps, &mut ramps);
+                            report(light, steps, tex_idx, textures[tex_idx].0);
+                        }
+                        sdl2::keyboard::Keycode::T => {
+                            tex_idx = (tex_idx + 1) % textures.len();
+                            report(light, steps, tex_idx, textures[tex_idx].0);
+                        }
+                        sdl2::keyboard::Keycode::G => {
+                            show_links = !show_links;
+                            println!("constraint links {}", if show_links { "on" } else { "off" });
+                        }
+                        sdl2::keyboard::Keycode::Tab => {
+                            show_ids = !show_ids;
+                            println!("ball numbers {}", if show_ids { "on" } else { "off" });
+                        }
+                        sdl2::keyboard::Keycode::P => {
+                            report(light, steps, tex_idx, textures[tex_idx].0);
+                            report_eyes(&walker);
+                            report_ears();
+                            report_mouth(&walker);
+                        }
+                        // The mouth, live while its size and height are judged:
+                        // span first, then how far down the snout it sits. The
+                        // values are in the title bar until they are settled and the
+                        // keys go. There is no curl key any more - the shape is the
+                        // image's.
+                        sdl2::keyboard::Keycode::K => {
+                            walker.mouth_span = (walker.mouth_span - 2.0).max(6.0);
+                            report_mouth(&walker);
+                            show_mouth(&mut canvas, &walker);
+                        }
+                        sdl2::keyboard::Keycode::L => {
+                            walker.mouth_span = (walker.mouth_span + 2.0).min(60.0);
+                            report_mouth(&walker);
+                            show_mouth(&mut canvas, &walker);
+                        }
+                        sdl2::keyboard::Keycode::N => {
+                            walker.mouth_rim_gap = (walker.mouth_rim_gap - 0.02).max(-0.4);
+                            report_mouth(&walker);
+                            show_mouth(&mut canvas, &walker);
+                        }
+                        sdl2::keyboard::Keycode::M => {
+                            walker.mouth_rim_gap = (walker.mouth_rim_gap + 0.02).min(1.2);
+                            report_mouth(&walker);
+                            show_mouth(&mut canvas, &walker);
+                        }
+                        // Height as an angle round the head's centre, not an offset
+                        // from the ground: raising an ear walks it up the sphere,
+                        // the way its radius and width already do.
+                        sdl2::keyboard::Keycode::Z => {
+                            light.ambient = (light.ambient - 0.05).max(0.0);
+                            report(light, steps, tex_idx, textures[tex_idx].0);
+                        }
+                        sdl2::keyboard::Keycode::X => {
+                            light.ambient = (light.ambient + 0.05).min(0.9);
+                            report(light, steps, tex_idx, textures[tex_idx].0);
+                        }
+                        _ => {}
                     }
                 }
-                sdl2::event::Event::KeyUp { keycode: Some(k), .. } => {
+                sdl2::event::Event::KeyUp {
+                    keycode: Some(k), ..
+                } => {
                     held.remove(&k);
                 }
                 sdl2::event::Event::MouseButtonDown {
-                    x, y, mouse_btn: sdl2::mouse::MouseButton::Left, ..
+                    x,
+                    y,
+                    mouse_btn: sdl2::mouse::MouseButton::Left,
+                    ..
                 } => {
                     // Pick in screen space: with a projection there is no single
                     // world point under the cursor.
@@ -1468,8 +1561,7 @@ fn main() -> Result<(), String> {
                             best = Some((i, d));
                         }
                     }
-                    let shift =
-                        held.contains(&Keycode::LShift) || held.contains(&Keycode::RShift);
+                    let shift = held.contains(&Keycode::LShift) || held.contains(&Keycode::RShift);
                     if shift {
                         // Carry the whole animal. The pose keeps driving it, so
                         // it holds its shape; only the body's world position
@@ -1490,7 +1582,10 @@ fn main() -> Result<(), String> {
                         println!("grab: nothing within reach");
                     }
                 }
-                sdl2::event::Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, .. } => {
+                sdl2::event::Event::MouseButtonUp {
+                    mouse_btn: sdl2::mouse::MouseButton::Left,
+                    ..
+                } => {
                     if carrying.take().is_some() {
                         println!("put the animal down");
                     }
@@ -1672,8 +1767,14 @@ fn main() -> Result<(), String> {
                 other => other,
             };
             Pattern {
-                base: ramps.get(&colour).cloned().unwrap_or_else(|| Ramp::new(vec![colour])),
-                alt: ramps.get(&alt).cloned().unwrap_or_else(|| Ramp::new(vec![alt])),
+                base: ramps
+                    .get(&colour)
+                    .cloned()
+                    .unwrap_or_else(|| Ramp::new(vec![colour])),
+                alt: ramps
+                    .get(&alt)
+                    .cloned()
+                    .unwrap_or_else(|| Ramp::new(vec![alt])),
                 texture: textures[tex_idx].1.clone(),
                 threshold: 128,
                 phase: 0.0,
@@ -1698,17 +1799,21 @@ fn main() -> Result<(), String> {
                 .iter()
                 .flat_map(|&(base, tip, _)| [base, tip])
                 .collect();
-            let mean = ear_balls.iter().map(|&i| screen[i].depth).sum::<f32>()
-                / ear_balls.len() as f32;
+            let mean =
+                ear_balls.iter().map(|&i| screen[i].depth).sum::<f32>() / ear_balls.len() as f32;
             // The ear planes, then each ball's bias from its own depth. See
             // `ear_planes` for why they are worked out as a set.
             let order = [
-                creature.ears[0].0, creature.ears[0].1,
-                creature.ears[1].0, creature.ears[1].1,
+                creature.ears[0].0,
+                creature.ears[0].1,
+                creature.ears[1].0,
+                creature.ears[1].1,
             ];
             let depths = [
-                screen[order[0]].depth, screen[order[1]].depth,
-                screen[order[2]].depth, screen[order[3]].depth,
+                screen[order[0]].depth,
+                screen[order[1]].depth,
+                screen[order[2]].depth,
+                screen[order[3]].depth,
             ];
             let planes = ear_planes(sk_depth, depths);
             for (n, &ear) in order.iter().enumerate() {
@@ -1730,7 +1835,9 @@ fn main() -> Result<(), String> {
             }
             let p = &doll.particles[i];
             let r = (p.radius * zoom).round() as i32;
-            if r < 1 { continue; }
+            if r < 1 {
+                continue;
+            }
             let (cx, cy) = (screen[i].x.round() as i32, screen[i].y.round() as i32);
             let cd = screen[i].depth + p.z_bias;
             if !p.no_rim {
@@ -1747,25 +1854,54 @@ fn main() -> Result<(), String> {
                 // Outline weight: the body's diameter plus four, so the
                 // annulus that survives is two pixels all the way round. An odd
                 // offset makes it one pixel on some edges and two on others.
-                draw_flat_disc(&mut surface, &mut depth, &table, cx, cy,
-                    ((r * 2) + 4) as usize, cd + 0.5, rim, &|_, _| true);
+                draw_flat_disc(
+                    &mut surface,
+                    &mut depth,
+                    &table,
+                    cx,
+                    cy,
+                    ((r * 2) + 4) as usize,
+                    cd + 0.5,
+                    rim,
+                    &|_, _| true,
+                );
             }
             let pat = pattern_for(p.colour);
-            draw_disc(&mut surface, &mut depth, &table, cx, cy, (r * 2) as usize, cd, 0.0,
-                Paint::Shaded { light, pattern: &pat }, &|_, _| true);
+            draw_disc(
+                &mut surface,
+                &mut depth,
+                &table,
+                cx,
+                cy,
+                (r * 2) as usize,
+                cd,
+                0.0,
+                Paint::Shaded {
+                    light,
+                    pattern: &pat,
+                },
+                &|_, _| true,
+            );
         }
 
         // ---- eyes: three shells ---------------------------------------------
         let heading = walker.heading_body;
         let (pc, ps) = (view.pitch.cos(), view.pitch.sin());
-        let mut groups: Vec<(usize, usize)> =
-            creature.eye_parts.iter().map(|&(s, i, _, _)| (s, i)).collect();
+        let mut groups: Vec<(usize, usize)> = creature
+            .eye_parts
+            .iter()
+            .map(|&(s, i, _, _)| (s, i))
+            .collect();
         groups.sort_by(|a, b| screen[b.0].depth.partial_cmp(&screen[a.0].depth).unwrap());
         for &(sclera, iris) in &groups {
             let sp = &doll.particles[sclera];
             let cp = &doll.particles[creature.skull];
             let eh = walker.facing.get(sclera).copied().unwrap_or(heading);
-            let fe = Body { pos: walker.body.pos, heading: eh }.forward();
+            let fe = Body {
+                pos: walker.body.pos,
+                heading: eh,
+            }
+            .forward();
 
             // Does the white sphere face the viewer? Its normal is the offset
             // from the head's centre.
@@ -1782,8 +1918,21 @@ fn main() -> Result<(), String> {
             if inner_visible {
                 // Shell 2: the white sphere, a full circle.
                 let pat = pattern_for(SCLERA);
-                draw_disc(&mut surface, &mut depth, &table, ix, iy, (re as i32 * 2) as usize,
-                    de, 0.0, Paint::Shaded { light, pattern: &pat }, &|_, _| true);
+                draw_disc(
+                    &mut surface,
+                    &mut depth,
+                    &table,
+                    ix,
+                    iy,
+                    (re as i32 * 2) as usize,
+                    de,
+                    0.0,
+                    Paint::Shaded {
+                        light,
+                        pattern: &pat,
+                    },
+                    &|_, _| true,
+                );
 
                 // Shell 3: pupil and iris, sliding inside the sphere and
                 // clipped by its rim rather than by the head.
@@ -1801,10 +1950,36 @@ fn main() -> Result<(), String> {
                 // Both sit on the sclera's surface, not on a sphere of their
                 // own: a pupil with its own depth is inside the eye it is
                 // painted on, and the sclera hides it.
-                draw_disc_on_sphere(&mut surface, &mut depth, &table, px, iy,
-                    ((ri as i32 * 2) + 4) as usize, cx, cy, re, de, -0.6, IRIS_RING, &inside);
-                draw_disc_on_sphere(&mut surface, &mut depth, &table, px, iy,
-                    (ri as i32 * 2) as usize, cx, cy, re, de, -0.9, IRIS, &inside);
+                draw_disc_on_sphere(
+                    &mut surface,
+                    &mut depth,
+                    &table,
+                    px,
+                    iy,
+                    ((ri as i32 * 2) + 4) as usize,
+                    cx,
+                    cy,
+                    re,
+                    de,
+                    -0.6,
+                    IRIS_RING,
+                    &inside,
+                );
+                draw_disc_on_sphere(
+                    &mut surface,
+                    &mut depth,
+                    &table,
+                    px,
+                    iy,
+                    (ri as i32 * 2) as usize,
+                    cx,
+                    cy,
+                    re,
+                    de,
+                    -0.9,
+                    IRIS,
+                    &inside,
+                );
             }
 
             // Shell 1: the lid. Never culled - it is coat colour, so over the
@@ -1826,12 +2001,35 @@ fn main() -> Result<(), String> {
                 }
                 uy < -(line + ux * tilt.tan())
             };
-            draw_ring(&mut surface, &mut depth, &table, ix, iy,
-                ((outer as i32 * 2) as usize).min(255), 2, de, -2.0, outline, &lid_keep);
+            draw_ring(
+                &mut surface,
+                &mut depth,
+                &table,
+                ix,
+                iy,
+                ((outer as i32 * 2) as usize).min(255),
+                2,
+                de,
+                -2.0,
+                outline,
+                &lid_keep,
+            );
             let lpat = pattern_for(LID);
-            draw_disc(&mut surface, &mut depth, &table, ix, iy,
-                ((outer as i32 * 2) as usize).min(255), de, -2.1,
-                Paint::Shaded { light, pattern: &lpat }, &lid_keep);
+            draw_disc(
+                &mut surface,
+                &mut depth,
+                &table,
+                ix,
+                iy,
+                ((outer as i32 * 2) as usize).min(255),
+                de,
+                -2.1,
+                Paint::Shaded {
+                    light,
+                    pattern: &lpat,
+                },
+                &lid_keep,
+            );
         }
 
         // ---- the mouth: a drawing wrapped onto the muzzle's surface ----------
@@ -1934,9 +2132,8 @@ fn main() -> Result<(), String> {
                                     // inverted.
                                     let tu = (0.5 + ax / (2.0 * half_h)) * mouth.w;
                                     let tv = (0.5 - ay / (2.0 * half_v)) * mouth.h;
-                                    let cov = mouth.sample(
-                                        tu - 0.75, tv - 0.75, tu + 0.75, tv + 0.75,
-                                    );
+                                    let cov =
+                                        mouth.sample(tu - 0.75, tv - 0.75, tu + 0.75, tv + 0.75);
                                     if cov < MOUTH_INK {
                                         continue;
                                     }
@@ -1965,14 +2162,25 @@ fn main() -> Result<(), String> {
                 let _ = f.write_all(&out);
             }
             let dmin = screen.iter().map(|p| p.depth).fold(f32::INFINITY, f32::min);
-            let dmax = screen.iter().map(|p| p.depth).fold(f32::NEG_INFINITY, f32::max);
+            let dmax = screen
+                .iter()
+                .map(|p| p.depth)
+                .fold(f32::NEG_INFINITY, f32::max);
             let nan = screen.iter().filter(|p| !p.depth.is_finite()).count();
             let xmin = screen.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
             let xmax = screen.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
             let ymin = screen.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
             let ymax = screen.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
-            println!("dump: {} balls, depth {:.0}..{:.0}, screen x {:.0}..{:.0} y {:.0}..{:.0}",
-                doll.particles.len(), dmin, dmax, xmin, xmax, ymin, ymax);
+            println!(
+                "dump: {} balls, depth {:.0}..{:.0}, screen x {:.0}..{:.0} y {:.0}..{:.0}",
+                doll.particles.len(),
+                dmin,
+                dmax,
+                xmin,
+                xmax,
+                ymin,
+                ymax
+            );
             if std::env::var("PETZ_DIAG").is_ok() {
                 for (i, p) in doll.particles.iter().enumerate() {
                     println!("part {i:2} r{:5.1} colour {:3} at ({:.0},{:.0}) side {:5.1} screen ({:.1},{:.1}) depth {:.1}",
@@ -2077,14 +2285,19 @@ mod walk_tests {
         let (doll, c, w) = run(2.0);
         let midpoint = |d: &Ragdoll| {
             let p = &d.particles[c.spine[2]];
-            view.project(w.body.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y))
+            view.project(
+                w.body
+                    .to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y),
+            )
         };
         let now = midpoint(&doll);
         let (d0, _, _, w0) = rig();
         let p0 = &d0.particles[c.spine[2]];
-        let start = View::new(25.0, GROUND).project(
-            w0.body.to_world(p0.pos.x - BODY_ORIGIN, p0.side, GROUND - p0.pos.y),
-        );
+        let start = View::new(25.0, GROUND).project(w0.body.to_world(
+            p0.pos.x - BODY_ORIGIN,
+            p0.side,
+            GROUND - p0.pos.y,
+        ));
         assert!(
             now.y < start.y - 10.0,
             "walking away did not move up the screen: {:.1} -> {:.1}",
@@ -2153,7 +2366,10 @@ mod walk_tests {
         let head = w.facing[c.head[1]];
         let tail = w.facing[*c.tail.last().unwrap()];
         let spread = wrap_pi(head - tail).abs();
-        assert!(spread > 0.08, "the body is still rigid: {spread:.3} rad between head and tail");
+        assert!(
+            spread > 0.08,
+            "the body is still rigid: {spread:.3} rad between head and tail"
+        );
     }
 
     #[test]
@@ -2182,7 +2398,10 @@ mod walk_tests {
                 worst = worst.max(d);
             }
         }
-        assert!(worst > 0.4, "spine stayed straight; max deviation {worst:.2} px");
+        assert!(
+            worst > 0.4,
+            "spine stayed straight; max deviation {worst:.2} px"
+        );
     }
 
     #[test]
@@ -2265,7 +2484,10 @@ mod walk_tests {
         let view = View::new(25.0, GROUND);
         let proj = |i: usize| {
             let p = &doll.particles[i];
-            let b = Body { pos: w.body.pos, heading };
+            let b = Body {
+                pos: w.body.pos,
+                heading,
+            };
             view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y))
         };
         let heads: Vec<(f32, f32, f32, f32)> = c
@@ -2281,11 +2503,7 @@ mod walk_tests {
             .map(|&sclera| {
                 let sp = &doll.particles[sclera];
                 // normal = offset from the head's centre; does it face the camera?
-                let (dx, dl, du) = (
-                    sp.pos.x - cp.pos.x,
-                    sp.side - cp.side,
-                    cp.pos.y - sp.pos.y,
-                );
+                let (dx, dl, du) = (sp.pos.x - cp.pos.x, sp.side - cp.side, cp.pos.y - sp.pos.y);
                 let ny = dx * heading.cos() - dl * heading.sin();
                 if -pc * ny + ps * du <= 0.0 {
                     return false;
@@ -2328,11 +2546,23 @@ mod walk_tests {
     #[test]
     fn one_eye_in_profile_and_two_from_the_front() {
         use std::f32::consts::{FRAC_PI_2, PI};
-        assert_eq!(visible_eyes(0.0), vec![false, false], "facing away should show no eyes");
+        assert_eq!(
+            visible_eyes(0.0),
+            vec![false, false],
+            "facing away should show no eyes"
+        );
         let profile = visible_eyes(FRAC_PI_2);
-        assert_eq!(profile.iter().filter(|v| **v).count(), 1, "profile shows one eye: {profile:?}");
+        assert_eq!(
+            profile.iter().filter(|v| **v).count(),
+            1,
+            "profile shows one eye: {profile:?}"
+        );
         let front = visible_eyes(PI);
-        assert_eq!(front.iter().filter(|v| **v).count(), 2, "facing the camera shows both: {front:?}");
+        assert_eq!(
+            front.iter().filter(|v| **v).count(),
+            2,
+            "facing the camera shows both: {front:?}"
+        );
     }
 
     #[test]
@@ -2344,7 +2574,10 @@ mod walk_tests {
                 both += 1;
             }
         }
-        assert!(both >= 30, "both eyes are only up for {both} degrees of the turn");
+        assert!(
+            both >= 30,
+            "both eyes are only up for {both} degrees of the turn"
+        );
     }
 
     #[test]
@@ -2357,7 +2590,10 @@ mod walk_tests {
         let angle = 27.0_f32.to_radians();
         let left = faces_viewer(heading, angle, -1.0);
         let right = faces_viewer(heading, angle, 1.0);
-        assert!(left && right, "both eyes should face the viewer at 225 degrees");
+        assert!(
+            left && right,
+            "both eyes should face the viewer at 225 degrees"
+        );
     }
 
     #[test]
@@ -2381,17 +2617,30 @@ mod walk_tests {
             .iter()
             .map(|&i| {
                 let p = &doll.particles[i];
-                let b = Body { pos: w.body.pos, heading: 0.0 };
-                view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y)).y
+                let b = Body {
+                    pos: w.body.pos,
+                    heading: 0.0,
+                };
+                view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y))
+                    .y
             })
             .collect();
         let d = (ys[0] - ys[1]).abs();
         let info: Vec<(f32, f32, f32)> = c
             .eyes
             .iter()
-            .map(|&i| (doll.particles[i].pos.x, doll.particles[i].pos.y, doll.particles[i].side))
+            .map(|&i| {
+                (
+                    doll.particles[i].pos.x,
+                    doll.particles[i].pos.y,
+                    doll.particles[i].side,
+                )
+            })
             .collect();
-        assert!(d < 0.6, "eyes differ in height by {d:.2} px: {ys:?} positions {info:?}");
+        assert!(
+            d < 0.6,
+            "eyes differ in height by {d:.2} px: {ys:?} positions {info:?}"
+        );
     }
 
     #[test]
@@ -2407,11 +2656,15 @@ mod walk_tests {
             "sclerae"
         );
         assert!(
-            c.eye_overlays.iter().all(|&(_, i)| doll.particles[i].colour == IRIS),
+            c.eye_overlays
+                .iter()
+                .all(|&(_, i)| doll.particles[i].colour == IRIS),
             "pupils"
         );
         assert!(
-            c.ears.iter().all(|&(base, _, _)| doll.particles[base].colour == MUZZLE_BLUE),
+            c.ears
+                .iter()
+                .all(|&(base, _, _)| doll.particles[base].colour == MUZZLE_BLUE),
             "ear bases carry the snout's blue"
         );
         assert_eq!(c.eyes.len(), 2, "two eyes");
@@ -2419,12 +2672,23 @@ mod walk_tests {
         // Counts by colour stopped meaning anything once the palette went
         // diagnostic and every fur ball became the same black.
         for &(base, tip, _) in &c.ears {
-            assert!(c.head.contains(&base) && c.head.contains(&tip), "ear balls are on the head");
+            assert!(
+                c.head.contains(&base) && c.head.contains(&tip),
+                "ear balls are on the head"
+            );
             assert_ne!(base, tip, "a base is not its own tip");
         }
         assert_eq!(c.eye_overlays.len(), 2, "one pupil per eye");
-        assert_eq!(c.head.len(), 11, "skull, muzzle, nose, four ear balls, four eye balls");
-        assert_eq!(doll.particles.len(), 48, "total ball count: 32 plus sixteen claws");
+        assert_eq!(
+            c.head.len(),
+            11,
+            "skull, muzzle, nose, four ear balls, four eye balls"
+        );
+        assert_eq!(
+            doll.particles.len(),
+            48,
+            "total ball count: 32 plus sixteen claws"
+        );
     }
 
     #[test]
@@ -2446,7 +2710,10 @@ mod walk_tests {
             }
             let at = |i: usize| {
                 let p = &doll.particles[i];
-                let b = Body { pos: w.body.pos, heading: w.body.heading };
+                let b = Body {
+                    pos: w.body.pos,
+                    heading: w.body.heading,
+                };
                 let s = view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y));
                 (s.x, s.y)
             };
@@ -2459,7 +2726,11 @@ mod walk_tests {
                 // Side on: one above the other, sharing a vertical axis. Both
                 // balls, or a tip drifts off the base it belongs to.
                 for (k, name) in [(0usize, "bases"), (1, "tips")] {
-                    let (a, b) = if k == 0 { (pts[0].0, pts[1].0) } else { (pts[0].1, pts[1].1) };
+                    let (a, b) = if k == 0 {
+                        (pts[0].0, pts[1].0)
+                    } else {
+                        (pts[0].1, pts[1].1)
+                    };
                     assert!(
                         (a.0 - b.0).abs() < 0.5,
                         "at {deg} degrees the ear {name} differ in x by {:.1} px",
@@ -2487,14 +2758,25 @@ mod walk_tests {
         for &(base, tip, s) in &c.ears {
             let b = doll.particles[base].pos;
             let t = doll.particles[tip].pos;
-            assert!((b.x - (sk.x - EAR_BACK)).abs() < 0.01, "base x {:.2}", b.x - sk.x);
-            assert!((b.y - (sk.y - EAR_UP)).abs() < 0.01, "base y {:.2}", b.y - sk.y);
+            assert!(
+                (b.x - (sk.x - EAR_BACK)).abs() < 0.01,
+                "base x {:.2}",
+                b.x - sk.x
+            );
+            assert!(
+                (b.y - (sk.y - EAR_UP)).abs() < 0.01,
+                "base y {:.2}",
+                b.y - sk.y
+            );
             assert!(
                 (doll.particles[base].side - s * EAR_SEP).abs() < 0.001,
                 "base side {:.2}",
                 doll.particles[base].side
             );
-            assert!((doll.particles[base].radius - EAR_SIZE).abs() < 0.001, "base size");
+            assert!(
+                (doll.particles[base].radius - EAR_SIZE).abs() < 0.001,
+                "base size"
+            );
             assert!(
                 (t.x - (b.x - EAR_TIP_BACK * apart)).abs() < 0.01,
                 "tip x {:.2}",
@@ -2505,7 +2787,10 @@ mod walk_tests {
                 "tip y {:.2}",
                 t.y - b.y
             );
-            assert!((doll.particles[tip].radius - EAR_TIP_SIZE).abs() < 0.001, "tip size");
+            assert!(
+                (doll.particles[tip].radius - EAR_TIP_SIZE).abs() < 0.001,
+                "tip size"
+            );
         }
     }
 
@@ -2533,22 +2818,36 @@ mod walk_tests {
             w.pose(&mut doll, &c, &rest);
             let depth = |i: usize| {
                 let p = &doll.particles[i];
-                let b = Body { pos: w.body.pos, heading: w.body.heading };
-                view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y)).depth
+                let b = Body {
+                    pos: w.body.pos,
+                    heading: w.body.heading,
+                };
+                view.project(b.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y))
+                    .depth
             };
             let sk = depth(c.skull);
             // The same helper the renderer uses, so the test cannot drift from
             // it. Plane order: base, tip, base, tip.
-            let planes = ear_planes(sk, [
-                depth(c.ears[0].0), depth(c.ears[0].1),
-                depth(c.ears[1].0), depth(c.ears[1].1),
-            ]);
+            let planes = ear_planes(
+                sk,
+                [
+                    depth(c.ears[0].0),
+                    depth(c.ears[0].1),
+                    depth(c.ears[1].0),
+                    depth(c.ears[1].1),
+                ],
+            );
             let (first, second) = (planes[0], planes[2]);
-            let (near, far) = if nearer_is_second { (second, first) } else { (first, second) };
+            let (near, far) = if nearer_is_second {
+                (second, first)
+            } else {
+                (first, second)
+            };
             assert!(
                 near < far - 0.5,
                 "at {deg} degrees the ears are {:.2} and {:.2} after the bias - no clear winner",
-                first, second
+                first,
+                second
             );
             // Still in front of the skull's rim, drawn at sk + 0.5.
             assert!(
@@ -2566,7 +2865,6 @@ mod walk_tests {
             );
         }
     }
-
 
     #[test]
     fn every_foot_carries_four_claws() {
@@ -2613,7 +2911,10 @@ mod walk_tests {
             across.sort_by(|a, b| a.partial_cmp(b).unwrap());
             assert_eq!(across.len(), 4, "four claws a foot");
             let spread = across[3] - across[0];
-            assert!(spread > 2.0 * CLAW_RADIUS + 6.0, "claws are spread across the toe, not stacked: {spread:.1}");
+            assert!(
+                spread > 2.0 * CLAW_RADIUS + 6.0,
+                "claws are spread across the toe, not stacked: {spread:.1}"
+            );
         }
     }
 
@@ -2652,7 +2953,6 @@ mod walk_tests {
         }
     }
 
-
     #[test]
     fn the_hip_stays_welded_to_its_spine_ball_through_a_turn() {
         // Reported from play, three times, and it had three causes in a row: the
@@ -2688,9 +2988,6 @@ mod walk_tests {
         }
     }
 
-
-
-
     #[test]
     fn pulling_an_ear_drags_the_head() {
         // The ears are pinned to the skull, so they hold their placement exactly
@@ -2722,7 +3019,6 @@ mod walk_tests {
         assert!(linked, "the ear is not linked to the skull");
     }
 
-
     #[test]
     fn nearer_balls_are_drawn_last() {
         // Painter's order, keyed on depth: the far side of the body must be
@@ -2735,7 +3031,11 @@ mod walk_tests {
             .iter()
             .map(|l| {
                 let p = &doll.particles[l.foot];
-                view.project(w.body.to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y)).depth
+                view.project(
+                    w.body
+                        .to_world(p.pos.x - BODY_ORIGIN, p.side, GROUND - p.pos.y),
+                )
+                .depth
             })
             .collect();
         let mut order: Vec<usize> = (0..4).collect();
@@ -2772,7 +3072,11 @@ mod walk_tests {
         }
         for i in 0..c.legs.len() {
             let share = planted[i] as f32 / samples as f32;
-            assert!(share > 0.35, "leg {i} planted only {:.0}% of the time", share * 100.0);
+            assert!(
+                share > 0.35,
+                "leg {i} planted only {:.0}% of the time",
+                share * 100.0
+            );
             assert!(
                 highest[i] < w.gait.spec.step_height + 6.0,
                 "leg {i} lifted {:.1} px, step is {:.1}",
@@ -2790,7 +3094,11 @@ mod walk_tests {
         for (i, y) in spine_y.iter().enumerate() {
             // The neck is lifted onto the head's axis, so it sits higher than
             // the rest of the spine by design.
-            let rest = if i == last { GROUND - 84.0 } else { GROUND - 68.0 };
+            let rest = if i == last {
+                GROUND - 84.0
+            } else {
+                GROUND - 68.0
+            };
             assert!(
                 (*y - rest).abs() < 14.0,
                 "spine ball {i} drifted to y={y:.1}, expected about {rest:.0}"
@@ -2833,7 +3141,10 @@ mod walk_tests {
             doll.step(1.0 / 120.0);
         }
         let root = c.tail[0];
-        assert!(doll.particles[root].pinned, "the tail root is not pinned to the rump");
+        assert!(
+            doll.particles[root].pinned,
+            "the tail root is not pinned to the rump"
+        );
         assert!(
             doll.particles[root].target.is_none(),
             "the tail root is still driven somewhere"
@@ -2898,17 +3209,29 @@ mod walk_tests {
         // both faces-camera headings.
         for facing in [std::f32::consts::PI, -std::f32::consts::PI] {
             let ox = mouth_slide(facing, r).expect("no mouth facing the camera");
-            assert!(ox.abs() < 1e-3, "the mouth is off-centre facing the camera: x {ox}");
+            assert!(
+                ox.abs() < 1e-3,
+                "the mouth is off-centre facing the camera: x {ox}"
+            );
         }
         // In profile it has slid to the rim, either way round.
         let right = mouth_slide(std::f32::consts::FRAC_PI_2, r).expect("no mouth in profile");
-        assert!((right - r).abs() < 1e-4, "profile mouth is not on the rim: x {right}");
+        assert!(
+            (right - r).abs() < 1e-4,
+            "profile mouth is not on the rim: x {right}"
+        );
         let left = mouth_slide(-std::f32::consts::FRAC_PI_2, r).expect("no mouth in profile");
-        assert!((left + r).abs() < 1e-4, "profile mouth is not on the other rim: x {left}");
+        assert!(
+            (left + r).abs() < 1e-4,
+            "profile mouth is not on the other rim: x {left}"
+        );
         // Facing away, there is nothing to paint: the drawing takes the near
         // surface for its depth, so drawing it would put it on the back of the
         // head.
-        assert!(mouth_slide(0.0, r).is_none(), "the mouth shows through the skull");
+        assert!(
+            mouth_slide(0.0, r).is_none(),
+            "the mouth shows through the skull"
+        );
     }
 
     #[test]
@@ -2946,8 +3269,14 @@ mod walk_tests {
         // The arms reach nearly to the rim, but not past it - past it the surface
         // has turned away and there is nothing to paint on.
         let bottom = theta_top + 2.0 * half_v;
-        assert!(bottom < std::f32::consts::FRAC_PI_2, "the wrapping runs over the rim");
-        assert!(bottom > 1.0, "the wrapping stops short of the rim: {bottom} rad");
+        assert!(
+            bottom < std::f32::consts::FRAC_PI_2,
+            "the wrapping runs over the rim"
+        );
+        assert!(
+            bottom > 1.0,
+            "the wrapping stops short of the rim: {bottom} rad"
+        );
     }
 
     #[test]
@@ -2958,8 +3287,14 @@ mod walk_tests {
         // mouth at the wrong end of the snout, so it is pinned here.
         let muzzle = Particle::new(408.0, 100.0, 13.0, 0);
         let nose = Particle::new(422.0, 96.0, 5.0, 0);
-        assert!(nose.pos.x > muzzle.pos.x, "the nose is not in front of the muzzle");
-        assert!(nose.pos.y < muzzle.pos.y, "the nose is not above the muzzle");
+        assert!(
+            nose.pos.x > muzzle.pos.x,
+            "the nose is not in front of the muzzle"
+        );
+        assert!(
+            nose.pos.y < muzzle.pos.y,
+            "the nose is not above the muzzle"
+        );
     }
 
     #[test]
@@ -3007,6 +3342,4 @@ mod walk_tests {
             "the root lags the rump by {step_err:.2} units after a step"
         );
     }
-
-
 }

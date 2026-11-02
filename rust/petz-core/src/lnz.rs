@@ -22,7 +22,8 @@ pub struct Section {
 impl Section {
     /// Body lines that carry data: non-empty and not a comment.
     pub fn data_lines(&self) -> impl Iterator<Item = &str> {
-        self.lines.iter()
+        self.lines
+            .iter()
             .map(|l| l.trim())
             .filter(|l| !l.is_empty() && !l.starts_with(';'))
     }
@@ -58,7 +59,11 @@ impl Lnz {
                     let name = rest[..close].trim().to_string();
                     let tail = rest[close + 1..].trim();
                     let comment = tail.strip_prefix(';').map(|c| c.trim().to_string());
-                    sections.push(Section { name, comment, lines: Vec::new() });
+                    sections.push(Section {
+                        name,
+                        comment,
+                        lines: Vec::new(),
+                    });
                     continue;
                 }
             }
@@ -77,6 +82,10 @@ impl Lnz {
         self.sections.iter().map(|s| s.name.as_str())
     }
 
-    pub fn len(&self) -> usize { self.sections.len() }
-    pub fn is_empty(&self) -> bool { self.sections.is_empty() }
+    pub fn len(&self) -> usize {
+        self.sections.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.sections.is_empty()
+    }
 }

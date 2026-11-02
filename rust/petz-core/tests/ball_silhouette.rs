@@ -37,26 +37,22 @@ fn evidence_dir() -> PathBuf {
 
 /// stride * height, read before the header size is known.
 fn stride_pending(raw: &[u8]) -> usize {
-    let word = |i: usize| -> u32 {
-        u32::from_le_bytes(raw[i * 4..i * 4 + 4].try_into().unwrap())
-    };
+    let word = |i: usize| -> u32 { u32::from_le_bytes(raw[i * 4..i * 4 + 4].try_into().unwrap()) };
     (word(3) as usize) * (word(1) as usize)
 }
 
 fn load_capture() -> Capture {
     let path = evidence_dir().join("ball/ball-input.raw");
-    let raw = fs::read(&path)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    let raw = fs::read(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
 
     // The header has grown over time (a presentation-index field was added
     // later), so derive its size from the file rather than assuming it.
-    let header_bytes = raw.len()
+    let header_bytes = raw
+        .len()
         .checked_sub(PALETTE_BYTES + BLOCK_BYTES + 2 * stride_pending(&raw))
         .expect("file shorter than its pixel payload");
 
-    let word = |i: usize| -> u32 {
-        u32::from_le_bytes(raw[i * 4..i * 4 + 4].try_into().unwrap())
-    };
+    let word = |i: usize| -> u32 { u32::from_le_bytes(raw[i * 4..i * 4 + 4].try_into().unwrap()) };
     let width = word(0) as usize;
     let height = word(1) as usize;
     let stride = word(3) as usize;
@@ -69,13 +65,23 @@ fn load_capture() -> Capture {
     let after_off = header_bytes + PALETTE_BYTES + BLOCK_BYTES + stride * height;
     let after = raw[after_off..after_off + stride * height].to_vec();
 
-    Capture { width, height, stride, min_x, min_y, bbox_w, bbox_h, after }
+    Capture {
+        width,
+        height,
+        stride,
+        min_x,
+        min_y,
+        bbox_w,
+        bbox_h,
+        after,
+    }
 }
 
 fn load_table() -> SpanTable {
     let path = evidence_dir().join("ball/tables.raw");
-    SpanTable::new(fs::read(&path)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display())))
+    SpanTable::new(
+        fs::read(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display())),
+    )
 }
 
 #[test]
@@ -86,7 +92,11 @@ fn captured_ball_is_explained_by_the_span_table() {
     // The captured ball measures 19 across, so it uses table entry 19.
     let diameter = 19usize;
     let widths: Vec<u8> = table.rows(diameter).to_vec();
-    assert_eq!(widths.len(), diameter, "table entry should have one width per row");
+    assert_eq!(
+        widths.len(),
+        diameter,
+        "table entry should have one width per row"
+    );
 
     // Centred at (9, 9) within the 35x26 capture region - derived from the
     // capture itself (rows 7..9 span the full 19 pixels from x=0).
@@ -98,10 +108,14 @@ fn captured_ball_is_explained_by_the_span_table() {
 
     for (row, &width) in widths.iter().enumerate() {
         let (y, left, len) = row_span(cx, cy, diameter, row, width);
-        if y < 0 || y as usize >= cap.bbox_h { continue; }
+        if y < 0 || y as usize >= cap.bbox_h {
+            continue;
+        }
         for i in 0..len {
             let x = left + i as i32;
-            if x < 0 || x as usize >= cap.bbox_w { continue; }
+            if x < 0 || x as usize >= cap.bbox_w {
+                continue;
+            }
             expected += 1;
             let px = cap.after[(cap.min_y as usize + y as usize) * cap.stride
                 + (cap.min_x as usize + x as usize)];
@@ -141,7 +155,9 @@ fn fill_disc_reproduces_the_span_geometry() {
         let (y, left, len) = row_span(cx, cy, diameter, row, width);
         for i in 0..len as i32 {
             let (x, yy) = (left + i, y);
-            if x < 0 || yy < 0 { continue; }
+            if x < 0 || yy < 0 {
+                continue;
+            }
             if (x as usize) < cap.bbox_w && (yy as usize) < cap.bbox_h {
                 assert_eq!(
                     surface.get(x as usize, yy as usize),

@@ -26,17 +26,32 @@ impl Surface {
 
     pub fn from_parts(width: usize, height: usize, stride: usize, pixels: Vec<u8>) -> Self {
         assert!(pixels.len() >= stride * height, "pixel buffer too small");
-        Self { width, height, stride, pixels }
+        Self {
+            width,
+            height,
+            stride,
+            pixels,
+        }
     }
 
-    pub fn width(&self) -> usize { self.width }
-    pub fn height(&self) -> usize { self.height }
-    pub fn stride(&self) -> usize { self.stride }
-    pub fn pixels(&self) -> &[u8] { &self.pixels }
+    pub fn width(&self) -> usize {
+        self.width
+    }
+    pub fn height(&self) -> usize {
+        self.height
+    }
+    pub fn stride(&self) -> usize {
+        self.stride
+    }
+    pub fn pixels(&self) -> &[u8] {
+        &self.pixels
+    }
 
     #[inline]
     pub fn get(&self, x: usize, y: usize) -> Option<u8> {
-        if x >= self.width || y >= self.height { return None; }
+        if x >= self.width || y >= self.height {
+            return None;
+        }
         Some(self.pixels[y * self.stride + x])
     }
 
@@ -50,10 +65,14 @@ impl Surface {
     /// Fill `[x, x + len)` on row `y` with `value`. Clipped.
     #[inline]
     pub fn fill_span(&mut self, y: usize, x: i32, len: usize, value: u8) {
-        if y >= self.height || len == 0 { return; }
+        if y >= self.height || len == 0 {
+            return;
+        }
         let start = x.max(0) as usize;
         let end = ((x + len as i32).max(0) as usize).min(self.width);
-        if start >= end { return; }
+        if start >= end {
+            return;
+        }
         let row = y * self.stride;
         for px in &mut self.pixels[row + start..row + end] {
             *px = value;

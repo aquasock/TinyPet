@@ -62,9 +62,13 @@ fn main() {
 
             let painted = surface.pixels().iter().filter(|&&p| p == 18).count();
             let rgb = palette.to_rgb(&surface);
-            let out = args.get(1).map(PathBuf::from)
+            let out = args
+                .get(1)
+                .map(PathBuf::from)
                 .unwrap_or_else(|| repo_root().join("build/ball.ppm"));
-            if let Some(parent) = out.parent() { let _ = fs::create_dir_all(parent); }
+            if let Some(parent) = out.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
             write_ppm(&out, w, h, &rgb).expect("write ppm");
 
             println!("table max diameter : {}", table.max_diameter());
@@ -96,13 +100,20 @@ fn main() {
                 fill_disc(&mut surface, &table, cx, cy, d, 80);
                 cx += 100;
                 per_row += 1;
-                if per_row == 5 { cx = 70; cy = 250; }
+                if per_row == 5 {
+                    cx = 70;
+                    cy = 250;
+                }
             }
 
             let rgb = palette.to_rgb(&surface);
-            let out = args.get(1).map(PathBuf::from)
+            let out = args
+                .get(1)
+                .map(PathBuf::from)
                 .unwrap_or_else(|| repo_root().join("build/demo.ppm"));
-            if let Some(parent) = out.parent() { let _ = fs::create_dir_all(parent); }
+            if let Some(parent) = out.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
             write_ppm(&out, w, h, &rgb).expect("write ppm");
             println!("diameters drawn : {:?}", diameters);
             println!("pixel hash      : {:016x}", fnv1a(surface.pixels()));
@@ -113,9 +124,9 @@ fn main() {
             let table = load_table().expect("tables.raw missing");
             let palette = load_palette().expect("ball-input.raw missing");
 
-            let raw = fs::read(repo_root().join("evidence/ball/ball-input.raw"))
-                .expect("read capture");
-            let word = |i: usize| u32::from_le_bytes(raw[i*4..i*4+4].try_into().unwrap());
+            let raw =
+                fs::read(repo_root().join("evidence/ball/ball-input.raw")).expect("read capture");
+            let word = |i: usize| u32::from_le_bytes(raw[i * 4..i * 4 + 4].try_into().unwrap());
             let (stride, min_x, min_y) = (word(3) as usize, word(4) as usize, word(5) as usize);
             let (bw, bh) = (word(6) as usize, word(7) as usize);
             let header = raw.len() - (1024 + 512 + 2 * stride * (word(1) as usize));
@@ -125,15 +136,21 @@ fn main() {
             let panel_w = bw * scale;
             let (w, h) = (panel_w * 2 + 16, bh * scale);
             let mut out = Surface::new(w, h);
-            for y in 0..h { for x in 0..w { out.set(x, y, 12); } }
+            for y in 0..h {
+                for x in 0..w {
+                    out.set(x, y, 12);
+                }
+            }
 
             // Left panel: the real capture.
             for y in 0..bh {
                 for x in 0..bw {
                     let px = raw[after_off + (min_y + y) * stride + min_x + x];
-                    for sy in 0..scale { for sx in 0..scale {
-                        out.set(x*scale+sx, y*scale+sy, px);
-                    }}
+                    for sy in 0..scale {
+                        for sx in 0..scale {
+                            out.set(x * scale + sx, y * scale + sy, px);
+                        }
+                    }
                 }
             }
 
@@ -143,16 +160,22 @@ fn main() {
             for y in 0..bh {
                 for x in 0..bw {
                     let px = ours.get(x, y).unwrap_or(12);
-                    for sy in 0..scale { for sx in 0..scale {
-                        out.set(panel_w + 16 + x*scale+sx, y*scale+sy, px);
-                    }}
+                    for sy in 0..scale {
+                        for sx in 0..scale {
+                            out.set(panel_w + 16 + x * scale + sx, y * scale + sy, px);
+                        }
+                    }
                 }
             }
 
             let rgb = palette.to_rgb(&out);
-            let path = args.get(1).map(PathBuf::from)
+            let path = args
+                .get(1)
+                .map(PathBuf::from)
                 .unwrap_or_else(|| repo_root().join("build/compare.ppm"));
-            if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
             write_ppm(&path, w, h, &rgb).expect("write ppm");
             println!("left: captured   right: petz-core fill_disc (same palette)");
             println!("wrote: {}", path.display());
@@ -165,32 +188,45 @@ fn main() {
             let bytes = fs::read(&path).expect("build/animation.petz - run tools/export-frames.py");
             let mut p = 4usize;
             let rd_u32 = |p: &mut usize| -> u32 {
-                let v = u32::from_le_bytes(bytes[*p..*p+4].try_into().unwrap()); *p += 4; v
+                let v = u32::from_le_bytes(bytes[*p..*p + 4].try_into().unwrap());
+                *p += 4;
+                v
             };
             let _ver = rd_u32(&mut p);
             let aw = rd_u32(&mut p) as usize;
             let ah = rd_u32(&mut p) as usize;
             let frame_count = rd_u32(&mut p) as usize;
-            let want: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(frame_count / 2);
+            let want: usize = args
+                .get(1)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(frame_count / 2);
             let want = want.min(frame_count.saturating_sub(1));
 
             for idx in 0..=want {
                 let nballs = rd_u32(&mut p) as usize;
                 let start = p;
                 p += nballs * 12;
-                if idx != want { continue; }
+                if idx != want {
+                    continue;
+                }
 
                 let (w, h) = (aw, ah);
                 let mut surface = Surface::new(w, h);
-                for y in 0..h { for x in 0..w { surface.set(x, y, BACKGROUND); } }
+                for y in 0..h {
+                    for x in 0..w {
+                        surface.set(x, y, BACKGROUND);
+                    }
+                }
                 for b in 0..nballs {
                     let o = start + b * 12;
-                    let cx = i16::from_le_bytes(bytes[o..o+2].try_into().unwrap()) as i32;
-                    let cy = i16::from_le_bytes(bytes[o+2..o+4].try_into().unwrap()) as i32;
-                    let dw = u16::from_le_bytes(bytes[o+4..o+6].try_into().unwrap()) as usize;
-                    let colour = bytes[o+8];
-                    let kind = bytes[o+9];
-                    if dw == 0 || dw > table.max_diameter() { continue; }
+                    let cx = i16::from_le_bytes(bytes[o..o + 2].try_into().unwrap()) as i32;
+                    let cy = i16::from_le_bytes(bytes[o + 2..o + 4].try_into().unwrap()) as i32;
+                    let dw = u16::from_le_bytes(bytes[o + 4..o + 6].try_into().unwrap()) as usize;
+                    let colour = bytes[o + 8];
+                    let kind = bytes[o + 9];
+                    if dw == 0 || dw > table.max_diameter() {
+                        continue;
+                    }
                     if kind == 3 {
                         petz_core::fill_ring(&mut surface, &table, cx, cy, dw, 1, colour);
                     } else {
@@ -200,7 +236,10 @@ fn main() {
                 let rgb = palette.to_rgb(&surface);
                 let out = repo_root().join(format!("build/frame-{want}.ppm"));
                 write_ppm(&out, w, h, &rgb).expect("write ppm");
-                println!("frame {want}/{frame_count}: {nballs} balls -> {}", out.display());
+                println!(
+                    "frame {want}/{frame_count}: {nballs} balls -> {}",
+                    out.display()
+                );
                 break;
             }
         }
@@ -214,8 +253,11 @@ fn main() {
             }
             if let Some(fur) = lnz.section("Ballz Info") {
                 let rows = fur.numbers();
-                println!("\nBallz Info: {} rows, first = {:?}", rows.len(),
-                         rows.first());
+                println!(
+                    "\nBallz Info: {} rows, first = {:?}",
+                    rows.len(),
+                    rows.first()
+                );
             }
         }
         other => {

@@ -46,10 +46,7 @@ impl Vec3 {
     /// Build a direction from two angles in degrees: `yaw` turns the light
     /// left/right, `pitch` raises it. Convenient for key-driven tuning.
     pub fn from_angles(yaw_deg: f32, pitch_deg: f32) -> Self {
-        let (y, p) = (
-            yaw_deg.to_radians(),
-            pitch_deg.to_radians(),
-        );
+        let (y, p) = (yaw_deg.to_radians(), pitch_deg.to_radians());
         Self::new(p.cos() * y.sin(), -p.sin(), p.cos() * y.cos()).normalised()
     }
 
@@ -107,7 +104,9 @@ impl Ramp {
                 // saturation. Grays have no meaningful hue, so treat them by
                 // saturation instead.
                 let dh = if bs < 0.12 || s < 0.12 {
-                    if s >= 0.12 { return None; }
+                    if s >= 0.12 {
+                        return None;
+                    }
                     0.0
                 } else {
                     let d = (h - bh).abs();
@@ -267,9 +266,7 @@ mod tests {
     }
 
     fn table() -> SpanTable {
-        SpanTable::new(
-            fs::read(repo_root().join("evidence/ball/tables.raw")).expect("span table"),
-        )
+        SpanTable::new(fs::read(repo_root().join("evidence/ball/tables.raw")).expect("span table"))
     }
 
     fn palette() -> Palette {
@@ -333,8 +330,14 @@ mod tests {
             };
             let mut s = Surface::new(64, 64);
             shade_disc(&mut s, &table, 32, 32, 40, &ramp, light);
-            let left = ramp.indices.iter().position(|&c| c == s.get(24, 32).unwrap());
-            let right = ramp.indices.iter().position(|&c| c == s.get(40, 32).unwrap());
+            let left = ramp
+                .indices
+                .iter()
+                .position(|&c| c == s.get(24, 32).unwrap());
+            let right = ramp
+                .indices
+                .iter()
+                .position(|&c| c == s.get(40, 32).unwrap());
             (left.unwrap(), right.unwrap())
         };
 
