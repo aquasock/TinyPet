@@ -1,4 +1,4 @@
-# Handoff - the face, after the tail was settled - 2026-10-30
+# Handoff - the face: mouth, whiskers, and a formatted tree - 2026-11-02
 
 Read this as orientation, not law. Refresh live state (`git status`, `git log`,
 `cargo test --workspace`) before acting on it. The living record is
@@ -14,11 +14,11 @@ Read this as orientation, not law. Refresh live state (`git status`, `git log`,
   only.
 - **The surface is 320x240**, the animal at half its authored size, in two window
   modes.
-- **The face has a nose, a mouth and whiskers.** The nose is a pink ball on the snout's
-  tip, as it always was. The mouth is a *drawing* mapped onto the muzzle's
-  the muzzle's **surface** - every pixel asks where it sits on the sphere and
-  looks the drawing up by that angle, so the arms curve round the snout. A
-  drawing, not a ball. Its **fork** is anchored just under the nose; anchoring the
+- **The face has a nose, a mouth and whiskers.** The nose is a pink ball on the
+  snout's tip, as it always was. The mouth is a *drawing* mapped onto the
+  muzzle's **surface** - every pixel asks where it sits on the sphere and looks
+  the drawing up by that angle, so the arms curve round the snout. A drawing, not
+  a ball. Its **fork** is anchored just under the nose; anchoring the
   bottom edge cannot survive wrapping, because the rim is where the surface turns
   edge-on. The top 10% of the bitmap is blanked - not cropped - to keep its first
   rows out of the pink nose. The whiskers are a second drawing, placed **flat** -
@@ -45,9 +45,13 @@ Do not rebuild it without asking. `docs/SANDBOX.md` keeps the numbers so it woul
 not have to be rediscovered.
 
 **The whiskers are a second drawing**, placed flat on purpose: a screen-space box
-wider than twice the muzzle's diameter, its depth taken from the nearest head ball
-rather than the muzzle so the outer half of each line is not buried by the skull.
-Near-white, because black whiskers on a black coat are not whiskers.
+wide enough to clear a skull that is twice the muzzle's radius, its depth taken
+from the nearest head ball rather than the muzzle so the outer half of each line is
+not buried. Near-white, because black whiskers on a black coat are not whiskers.
+Drawn in one pass at every heading, anchored to the muzzle's projected position
+and put in front of the nearest head surface. Two passes - front and back - kept
+different pixels and snapped fifteen pixels sideways at 270 degrees; one rule
+removed the snap.
 
 **The mouth, in ten passes, two of them reverted.** A small black circle, a thin line, a curve, a
 flip, a supplied nose-and-whiskers sheet, a supplied mouth drawing, and finally
@@ -152,8 +156,22 @@ holding `K` walked a value to its bound. The text path went when the sway did; t
 
 ## Next step
 
-The owner's thread is **the face**. The mouth's shape and place are settled; what
-is left is expression:
+The owner's thread is **the face**. The mouth's shape and place are settled, and
+the whiskers now render from every angle without snapping or clipping. Two things
+are knowingly imperfect and the owner has seen both:
+
+- **Whiskers are thin - "a bit stringy".** They are a flat 173x42 drawing minified
+  about four times, so a 3 px source stroke lands as one pixel. `WHISKER_SPAN`
+  trades length for thickness. The real fix is whiskers as **line segments** -
+  six roots on the muzzle, six tips in body space, projected and drawn as lines.
+  They would foreshorten honestly, stay straight, never clip and need no
+  minification. The owner was offered it and deferred; the bitmap is still what is
+  in the tree.
+- **Whiskers still bend up as the head turns.** Only the width foreshortens, so
+  the slanted lines steepen. Scaling both axes was tried and is worse (they shrink
+  to nothing by 120 degrees). The same 3D-line change fixes this.
+
+What is left beyond that is expression:
 
 1. **The tongue.** Retail draws it as another marking on the snout - the same
    texture model as the mouth, so it is a second curve or disc with its own

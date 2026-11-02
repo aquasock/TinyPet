@@ -506,41 +506,62 @@ the eyelid states are the rest of the face work.
 A second supplied drawing: six lines, three a side, splaying out from the sides of
 the snout. Same converter, same coverage grid, same sampling.
 
+```
+WHISKER_SPAN        85.0  body units wide; 43 px at the default zoom
+WHISKER_DROP_PX     -2.0  above the nose's centre, in screen px at 1:1
+WHISKER_MIN_TURN    0.35  floor on horizontal foreshortening
+WHISKERS            10    the light ramp's near-white
+```
+
 **Flat, deliberately - the opposite choice to the mouth.** Whiskers are thin,
 straight, and their whole job is to reach past the face. Wrapping them round the
-muzzle's 13-unit sphere would curl them and shorten them, which is the one thing
-they must not do, so this is the flat placement the earlier versions used: a
-screen-space box positioned relative to the muzzle and slid by the heading.
+muzzle's 13-unit sphere would curl them and shorten them, so this is the flat
+placement: a screen-space box slid by the heading.
 
-```
-WHISKER_SPAN  62.0  body units wide; 31 px at the default zoom
-WHISKER_DROP  -0.10  above the muzzle's centre, as a fraction of its radius
-WHISKERS      10    the light ramp's near-white
-```
+**The span is generous on purpose.** The skull's radius is twice the muzzle's, so
+whiskers rooted at the snout have to reach well past it to show at all. At 62 body
+units the tips cleared the head silhouette by one pixel - which is why they were
+invisible from behind. At 85 they clear by seven either side.
 
-The span is more than twice the muzzle's diameter on purpose. A whisker inside the
-snout's silhouette is not a whisker.
+**In front where nothing covers, behind where the head does.** The depth bias used
+to be added to whatever surface was underneath, including the skull - which put a
+whisker 0.9 units *in front of* the head it was meant to be behind, so stubs
+painted across the middle of a turned head at 60 degrees. The rule is now
+explicit: over the muzzle it lies on the muzzle's own surface; where any head ball
+covers it, it goes behind that ball and the head hides it; where nothing covers it,
+it goes in front so the tips read against the background. Measured at 45, 60, 75
+and 90 degrees, zero whisker pixels are fully surrounded by coat.
 
-**Depth past the snout comes from the head, not the muzzle.** Where a pixel is
-over the muzzle it takes the muzzle's own surface. Past it - and most of a whisker
-is past it - it takes the *nearest head ball* under that pixel. Without that the
-skull, whose near surface is a few units in front of the muzzle's centre, buries
-the outer half of every line and only the middle survives.
+**One pass, at every heading.** It used to switch between a muzzle-anchored
+front pass and a skull-anchored back pass at `cos(heading) = 0`, and the two kept
+completely different pixels - the front a sliver near the snout, the back the outer
+fringe past the silhouette. So between 268 and 271 degrees the whole set jumped
+fifteen pixels sideways and nearly tripled in pixel count at once. No tuning makes
+two different rules agree at a boundary; there is now one rule. Anchored to the
+muzzle's projected position at every heading, drawn in front of the nearest head
+surface, so it is visible from the front and from behind without a second pass.
 
-**The colour is not black.** Black is what whiskers are, and black is also the
-coat on this palette, so black whiskers would be drawn and invisible. They take
-the light ramp's near-white instead, which reads on both the black coat and the
-blue snout. Under `PETZ_DIAG` they are yellow (251), so they can be told apart
-from the mouth's green in a dump.
+Measured around the full circle in ten-degree steps: 124 px from dead astern, 32 at
+the profile, 154 facing the camera, 34 at the other profile, 124 again - and
+across the 270 degree boundary specifically, 33/33/34/34/34/34/34/34 px with the
+bounding box unchanged. The mirror used when the head faces away is still a
+discrete switch, but it is invisible either side of the boundary because the
+drawing is near-symmetric and the box is at its narrowest there.
 
-**They sit above the muzzle's centre** - `WHISKER_DROP` is negative - which puts
-the middle line at the nose's height. Placed at the nose's own level the lowest
-line crossed the mouth and both became unreadable. Measured under `PETZ_DIAG`, the
-whiskers' lowest row is 1-2 px above the mouth's highest at 180, 150, 120 and 90
-degrees.
+**The colour is not black.** Black is what whiskers are, and black is also the coat
+on this palette, so black whiskers would be drawn and invisible. They take the
+light ramp's near-white, which reads on both the black coat and the blue snout.
+Under `PETZ_DIAG` they are yellow (251), distinct from the mouth's green.
 
 `PETZ_WHISKER` and `PETZ_WHISKER_DROP` set both values headlessly; `P` reports
 them. There are no live keys - the values were judged by rendering and looking.
+
+**Known imperfect.** Only the width foreshortens, so the slanted lines steepen as
+the head turns and read as rotating upward. Scaling both axes to keep the drawing's
+aspect was tried and is worse: the whiskers shrink to almost nothing by 120
+degrees. Whiskers as real 3D line segments - roots and tips in body space,
+projected and drawn as lines - would foreshorten honestly and need no back pass.
+That is the change to make if the stretch ever matters enough.
 
 ## Reference findings worth keeping
 

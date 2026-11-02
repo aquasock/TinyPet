@@ -144,13 +144,21 @@ const MOUTH_MIN_TURN: f32 = 0.18;
 /// `WHISKER_SPAN` is its width in body units, which is deliberately several times
 /// the muzzle's diameter: the point of a whisker is that it reaches past the
 /// snout. The height follows from the image's aspect.
-const WHISKER_SPAN: f32 = 62.0;
+const WHISKER_SPAN: f32 = 85.0;
 
-/// How far below the muzzle's centre the whiskers sit, as a fraction of its
-/// radius. Negative: they sit slightly *above* the centre, which puts the middle
-/// line at the nose's height and keeps the lower line clear of the mouth. At the
-/// nose's own level they crossed the mouth and muddied it.
-const WHISKER_DROP: f32 = -0.10;
+/// How far below the nose's centre the whiskers are centred, in screen pixels at
+/// 1:1 zoom.
+///
+/// Anchored to the nose rather than to the muzzle's centre, for the same reason
+/// the mouth is: the muzzle ball swings on screen as the animal turns, and a
+/// decal offset from its centre slipped several pixels against the nose over a
+/// quarter turn. Measured from the nose it does not move.
+const WHISKER_DROP_PX: f32 = -2.0;
+
+/// How far the whiskers are allowed to foreshorten as the head turns. Higher than
+/// the mouth's floor: whiskers are seen from the side in life, and a head that is
+/// in profile still has them.
+const WHISKER_MIN_TURN: f32 = 0.35;
 
 /// The whiskers' colour: the near-white the light ramp already uses. They are
 /// drawn over the black coat as well as the blue snout, and black whiskers on a
@@ -721,7 +729,7 @@ struct Walker {
     /// The whiskers' width in body units, and how far below the muzzle's centre
     /// they sit as a fraction of its radius.
     whisker_span: f32,
-    whisker_drop: f32,
+    whisker_drop_px: f32,
 }
 
 /// Fastest the animal's body can turn, in radians per second.
@@ -809,10 +817,10 @@ impl Walker {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(WHISKER_SPAN),
-            whisker_drop: std::env::var("PETZ_WHISKER_DROP")
+            whisker_drop_px: std::env::var("PETZ_WHISKER_DROP")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(WHISKER_DROP),
+                .unwrap_or(WHISKER_DROP_PX),
         }
     }
 
@@ -1138,6 +1146,128 @@ fn mouth_slide(heading: f32, radius: f32) -> Option<f32> {
     Some(radius * heading.sin())
 }
 
+/// Draw the whiskers once, as a flat decal centred on a screen point.
+///
+/// Flat, unlike the mouth, and for a reason that survives the obvious objection:
+/// the drawing is 173x42 and reaches more than twice the muzzle's width, so it
+/// cannot sit on a 13-unit ball without wrapping past the hemisphere. Whiskers
+/// leave the face; that is the whole point of them.
+///
+/// `scale` foreshortens the drawing as the head turns, and it applies to **both**
+/// axes. Scaling only the width - which is what a flat rectangle on a turning
+/// rectangle would do - turns the drawing into a tall narrow smear: the three
+/// lines crowd together while the spacing between them stays put, which reads as
+/// the whiskers rotating upwards. A marking on a head that turns away shrinks as
+/// a whole. `flip` mirrors the drawing, which is what the back of the head needs.
+#[allow(clippy::too_many_arguments)]
+fn paint_whiskers(
+    surface: &mut Surface,
+    depth: &mut DepthBuffer,
+    decal: &Decal,
+    cx: f32,
+    cy: f32,
+    re: f32,
+    de: f32,
+    head_geo: &[(f32, f32, f32, f32)],
+    span: f32,
+    scale: f32,
+    flip: bool,
+    colour: u8,
+) {
+    // Only the width foreshortens. Scaling the height too was tried, to keep the
+    // drawing's aspect - it makes the whiskers shrink to almost nothing by the
+    // time the head is a third of the way round, which is worse than the stretch
+    // it was meant to cure.
+    let wide = (span * scale).max(1.0);
+    let tall = (span * decal.h / decal.w).max(1.0);
+    let (left, top) = (cx - wide / 2.0, cy - tall / 2.0);
+    let (sx, sy) = (decal.w / wide, decal.h / tall);
+    let (x0, x1) = (left.floor() as i32, (left + wide).ceil() as i32);
+    let (y0, y1) = (top.floor() as i32, (top + tall).ceil() as i32);
+    for y in y0..y1 {
+        if y < 0 || y as usize >= surface.height() {
+            continue;
+        }
+        for x in x0..x1 {
+            if x < 0 || x as usize >= surface.width() {
+                continue;
+            }
+            let (u0, u1) = ((x as f32 - left) * sx, (x as f32 + 1.0 - left) * sx);
+            let (v0, v1) = ((y as f32 - top) * sy, (y as f32 + 1.0 - top) * sy);
+            // Mirror by reversing the column span, expanding in the same
+            // direction. Expanding after the mirror instead pushes the sample
+            // past the bitmap's right edge, where it reads as no ink - which
+            // clipped one side of a flipped drawing and left the other whole.
+            let (u0, u1) = if flip {
+                (decal.w - u1, decal.w - u0)
+            } else {
+                (u0, u1)
+            };
+            if decal.sample(u0 - 0.75, v0 - 0.75, u1 + 0.75, v1 + 0.75) < MOUTH_INK {
+                continue;
+            }
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            let dr = (fx - cx).powi(2) + (fy - cy).powi(2);
+            // With no reference sphere this pass is the *back* of the head: the
+            // drawing goes just behind the skull, so the head hides its middle and
+            // only the tips show past the silhouette. That is what whiskers on a
+            // turned-away head look like - not a flat stamp over the back of it.
+            if re <= 0.5 {
+                // Only past the silhouette: everything the head covers is left
+                // alone, so the drawing cannot streak through the gaps between
+                // the head's own balls. What survives is the tips.
+                let covered = head_geo
+                    .iter()
+                    .any(|&(hx, hy, hr, _)| (fx - hx).powi(2) + (fy - hy).powi(2) <= hr * hr);
+                if !covered && depth.test_and_set(x as usize, y as usize, de + 0.5) {
+                    surface.set(x as usize, y as usize, colour);
+                }
+                continue;
+            }
+            // Where this pixel sits relative to the head. `None` means nothing
+            // covers it and the whisker should be drawn; `Some(surface)` means a
+            // head ball is in the way and the whisker belongs *behind* it.
+            //
+            // The bias used to be added to whatever was underneath, including the
+            // skull, which put a whisker 0.9 units in front of the head it was
+            // meant to be behind - so stubs painted right across the middle of a
+            // turned head. In front where nothing covers, behind where something
+            // does; that is the whole rule.
+            let over_muzzle = dr <= re * re;
+            let mut covered = !over_muzzle;
+            let mut nearest = de;
+            if !over_muzzle {
+                for &(hx, hy, hr, hd) in head_geo {
+                    let h2 = (fx - hx).powi(2) + (fy - hy).powi(2);
+                    if h2 <= hr * hr {
+                        let s = hd - (hr * hr - h2).max(0.0).sqrt();
+                        if s < nearest {
+                            nearest = s;
+                        }
+                        covered = true;
+                    }
+                }
+            }
+            let z = if over_muzzle {
+                // On the ball it is anchored to: that ball's own surface, and in
+                // front of it, so the drawing lies on the snout.
+                de - (1.0 - dr / (re * re)).max(0.0).sqrt() * re + MOUTH_BIAS
+            } else if covered {
+                // Behind the head that covers it: the head hides this pixel and
+                // the whisker shows only where it gets past the silhouette.
+                nearest - MOUTH_BIAS
+            } else {
+                // Past every head ball: in front of the empty space it crosses, so
+                // the tips are visible against whatever is behind the animal.
+                nearest + MOUTH_BIAS
+            };
+            if depth.test_and_set(x as usize, y as usize, z) {
+                surface.set(x as usize, y as usize, colour);
+            }
+        }
+    }
+}
+
 /// The drawing's extent on the muzzle, as angles: where its fork sits below the
 /// viewer's axis, and its half-width and half-height in radians.
 ///
@@ -1212,7 +1342,7 @@ fn report_mouth(w: &Walker) {
     );
     println!(
         "whiskers: span {:.1}  drop {:.2}",
-        w.whisker_span, w.whisker_drop
+        w.whisker_span, w.whisker_drop_px
     );
 }
 
@@ -2195,23 +2325,24 @@ fn main() -> Result<(), String> {
             }
         }
 
-        // ---- the whiskers: a drawing laid flat over the muzzle ----------------
-        // Flat on purpose, unlike the mouth. Whiskers are thin, straight and their
-        // whole job is to reach past the face; wrapping them round a 13-unit ball
-        // would curl them into the snout. So this is the decal the earlier
-        // versions used: a screen-space box, positioned relative to the muzzle and
-        // slid by the heading, with its ink clipped only by what is in front of it.
+        // ---- the whiskers: a drawing laid flat over the head -----------------
+        // Flat, unlike the mouth, because the drawing reaches more than twice the
+        // muzzle's width and cannot sit on a 13-unit ball without wrapping past
+        // the hemisphere. Whiskers leave the face; that is the point of them.
+        //
+        // One pass, not two. It used to switch between a muzzle-anchored front
+        // pass and a skull-anchored back pass at `cos(heading) = 0`, and the two
+        // kept completely different pixels - the front a sliver near the snout,
+        // the back the outer fringe past the silhouette - so at 271 degrees the
+        // whole set jumped fifteen pixels sideways at once. There is no tuning
+        // that makes two different rules agree at the boundary, so there is now
+        // one rule.
         {
             let m = creature.muzzle;
             let mp = &doll.particles[m];
             let mh = walker.facing.get(m).copied().unwrap_or(heading);
             let re = (mp.radius * zoom).round().max(1.0);
-            let (cx, cy) = (screen[m].x.round() + 0.5, screen[m].y.round() + 0.5);
-            let de = screen[m].depth;
-            // Every head ball on screen, so a pixel past the snout can ask what is
-            // nearest to it there. Without this the skull - whose near surface is
-            // a few units in front of the muzzle's centre - buries the whiskers
-            // and only the middle of each line survives.
+            // Every head ball on screen, for the depth of a pixel past the snout.
             let head_geo: Vec<(f32, f32, f32, f32)> = creature
                 .head_balls
                 .iter()
@@ -2220,58 +2351,28 @@ fn main() -> Result<(), String> {
                     Some((screen[i].x, screen[i].y, p.radius * zoom, screen[i].depth))
                 })
                 .collect();
-            if let Some(ox) = mouth_slide(mh, re) {
-                let full = (walker.whisker_span * zoom).max(1.0);
-                let wide = (full * mh.cos().abs().max(MOUTH_MIN_TURN)).max(1.0);
-                let tall = (full * whiskers.h / whiskers.w).max(1.0);
-                let centre_y = cy + walker.whisker_drop * re;
-                let (left, top) = (cx + ox - wide / 2.0, centre_y - tall / 2.0);
-                let (sx, sy) = (whiskers.w / wide, whiskers.h / tall);
-                let (x0, x1) = (left.floor() as i32, (left + wide).ceil() as i32);
-                let (y0, y1) = (top.floor() as i32, (top + tall).ceil() as i32);
-                for y in y0..y1 {
-                    if y < 0 || y as usize >= H {
-                        continue;
-                    }
-                    for x in x0..x1 {
-                        if x < 0 || x as usize >= W {
-                            continue;
-                        }
-                        let cov = whiskers.sample(
-                            (x as f32 - left) * sx,
-                            (y as f32 - top) * sy,
-                            (x as f32 + 1.0 - left) * sx,
-                            (y as f32 + 1.0 - top) * sy,
-                        );
-                        if cov < MOUTH_INK {
-                            continue;
-                        }
-                        let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-                        let dr = (fx - cx).powi(2) + (fy - cy).powi(2);
-                        let z = if dr <= re * re {
-                            // Over the snout: its own surface.
-                            de - (1.0 - dr / (re * re)).max(0.0).sqrt() * re
-                        } else {
-                            // Past the snout: just in front of the nearest head
-                            // ball under this pixel, or the snout's depth if none.
-                            let mut nearest = de;
-                            for &(hx, hy, hr, hd) in &head_geo {
-                                let h2 = (fx - hx).powi(2) + (fy - hy).powi(2);
-                                if h2 <= hr * hr {
-                                    let s = hd - (hr * hr - h2).max(0.0).sqrt();
-                                    if s < nearest {
-                                        nearest = s;
-                                    }
-                                }
-                            }
-                            nearest
-                        } + MOUTH_BIAS;
-                        if depth.test_and_set(x as usize, y as usize, z) {
-                            surface.set(x as usize, y as usize, whisker_col);
-                        }
-                    }
-                }
-            }
+            let span = (walker.whisker_span * zoom).max(1.0);
+            // Foreshortening, floored so a head in profile still has whiskers.
+            // Applying it to both axes was tried and is worse: the set shrinks to
+            // almost nothing by 120 degrees.
+            let scale = mh.cos().abs().max(WHISKER_MIN_TURN);
+            // Anchored to where the *muzzle* has landed, at every heading. The
+            // snout sits off to one side as the head turns, so anchoring to the
+            // skull instead draws them round the wrong axis.
+            paint_whiskers(
+                &mut surface,
+                &mut depth,
+                &whiskers,
+                screen[m].x.round() + 0.5,
+                screen[m].y.round() + walker.whisker_drop_px * zoom,
+                re,
+                screen[m].depth,
+                &head_geo,
+                span,
+                scale,
+                mh.cos() > 1e-3,
+                whisker_col,
+            );
         }
 
         // Dump our own framebuffer, bypassing the window system entirely. Screen
@@ -3416,15 +3517,16 @@ mod walk_tests {
             "the whiskers do not reach past the snout: {wide} px wide, snout {} px",
             2.0 * re
         );
-        // 2. They sit above the muzzle's centre, which puts the middle line at the
-        // nose's height. Centred, they crossed the mouth and muddied it.
+        // 2. They are anchored to the nose, which does not slide against the muzzle
+        // as the head turns - the muzzle's own ball does. A drop of zero would put
+        // them on the nose; a few pixels of offset keeps them clear of it.
         assert!(
-            WHISKER_DROP < 0.0,
-            "the whiskers sit on or below the snout's centre"
+            WHISKER_DROP_PX.abs() <= 6.0,
+            "the whiskers are too far from the nose: {WHISKER_DROP_PX} px"
         );
-        // 3. The lowest line stays above the bottom of the snout, where the mouth
-        // now is. Both are placed from the same centre, so this needs no render.
-        let whisker_bottom = WHISKER_DROP * re + (wide * 42.0 / 173.0) / 2.0;
+        // 3. Their lowest row stays above the bottom of the snout, where the mouth
+        // is, so the two do not run together.
+        let whisker_bottom = WHISKER_DROP_PX + (wide * 42.0 / 173.0) / 2.0;
         assert!(
             whisker_bottom < re,
             "the whiskers reach the bottom of the snout, into the mouth: \
