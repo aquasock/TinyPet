@@ -135,6 +135,28 @@ const MOUTH_RIM_GAP: f32 = 0.0;
 /// closer to what the snout should show there than nothing is.
 const MOUTH_MIN_TURN: f32 = 0.18;
 
+/// The whiskers: six lines, three a side, splaying out from the sides of the
+/// snout. A drawing like the mouth, but placed **flat** - laid over the muzzle's
+/// disc rather than wrapped on its surface. Whiskers are thin, straight and stick
+/// out past the face, so the thing that matters is that they leave the snout and
+/// stay straight; wrapping them round a 13-unit ball would curl them.
+///
+/// `WHISKER_SPAN` is its width in body units, which is deliberately several times
+/// the muzzle's diameter: the point of a whisker is that it reaches past the
+/// snout. The height follows from the image's aspect.
+const WHISKER_SPAN: f32 = 62.0;
+
+/// How far below the muzzle's centre the whiskers sit, as a fraction of its
+/// radius. Negative: they sit slightly *above* the centre, which puts the middle
+/// line at the nose's height and keeps the lower line clear of the mouth. At the
+/// nose's own level they crossed the mouth and muddied it.
+const WHISKER_DROP: f32 = -0.10;
+
+/// The whiskers' colour: the near-white the light ramp already uses. They are
+/// drawn over the black coat as well as the blue snout, and black whiskers on a
+/// black cat are not a whisker - this palette has no way to tell them apart.
+const WHISKERS: u8 = LIGHT;
+
 /// A source pixel counts as ink at or above this coverage.
 const MOUTH_INK: u8 = 128;
 
@@ -143,6 +165,9 @@ const MOUTH_INK: u8 = 128;
 /// Under `PETZ_DIAG` it is green instead, so it can be found in a pixel dump.
 const MOUTH: u8 = 244;
 const DIAG_MOUTH: u8 = 250;
+/// The whiskers under `PETZ_DIAG`: magenta, distinct from the mouth's green so
+/// the two can be told apart in a dump.
+const DIAG_WHISKERS: u8 = 251;
 
 /// How far in front of the surface it is painted on the mouth is drawn, in world
 /// units. Small: enough to beat the snout under it, not enough to win against
@@ -250,11 +275,19 @@ struct Decal {
 }
 
 fn load_mouth() -> Decal {
-    let raw: &'static [u8] = include_bytes!("../../assets/mouth.raw");
-    assert_eq!(&raw[0..4], b"MKNG", "mouth asset: bad magic");
+    decode_decal(include_bytes!("../../assets/mouth.raw"), "mouth")
+}
+
+fn load_whiskers() -> Decal {
+    decode_decal(include_bytes!("../../assets/whiskers.raw"), "whiskers")
+}
+
+/// Unpack a coverage grid written by `tools/make-marking.py`.
+fn decode_decal(raw: &'static [u8], name: &str) -> Decal {
+    assert_eq!(&raw[0..4], b"MKNG", "{name} asset: bad magic");
     let w = u16::from_le_bytes([raw[4], raw[5]]) as usize;
     let h = u16::from_le_bytes([raw[6], raw[7]]) as usize;
-    assert_eq!(raw.len(), 8 + w * h, "mouth asset: size mismatch");
+    assert_eq!(raw.len(), 8 + w * h, "{name} asset: size mismatch");
     Decal {
         w: w as f32,
         h: h as f32,
@@ -685,6 +718,10 @@ struct Walker {
     /// comes from the image, so neither is a number to tune.
     mouth_span: f32,
     mouth_rim_gap: f32,
+    /// The whiskers' width in body units, and how far below the muzzle's centre
+    /// they sit as a fraction of its radius.
+    whisker_span: f32,
+    whisker_drop: f32,
 }
 
 /// Fastest the animal's body can turn, in radians per second.
@@ -768,6 +805,14 @@ impl Walker {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(MOUTH_RIM_GAP),
+            whisker_span: std::env::var("PETZ_WHISKER")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(WHISKER_SPAN),
+            whisker_drop: std::env::var("PETZ_WHISKER_DROP")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(WHISKER_DROP),
         }
     }
 
@@ -1165,6 +1210,10 @@ fn report_mouth(w: &Walker) {
         "mouth: span {:.1}  rim gap {:.2}",
         w.mouth_span, w.mouth_rim_gap
     );
+    println!(
+        "whiskers: span {:.1}  drop {:.2}",
+        w.whisker_span, w.whisker_drop
+    );
 }
 
 /// Put the mouth's live values in the window title, where they can be read
@@ -1303,6 +1352,7 @@ fn main() -> Result<(), String> {
     let table = load_table();
     let palette = load_palette();
     let mouth = load_mouth();
+    let whiskers = load_whiskers();
 
     let mut steps = 6usize;
     let mut ramps: HashMap<u8, Ramp> = HashMap::new();
@@ -1362,16 +1412,10 @@ fn main() -> Result<(), String> {
     // Ball numbers, for referring to them. Tab toggles.
     let mut show_ids = true;
     // Diagnostics: red outlines under PETZ_DIAG, so the ear ordering shows up.
-    let outline = if std::env::var("PETZ_DIAG").is_ok() {
-        DIAG_OUTLINE
-    } else {
-        OUTLINE
-    };
-    let mouth_col = if std::env::var("PETZ_DIAG").is_ok() {
-        DIAG_MOUTH
-    } else {
-        MOUTH
-    };
+    let diag = std::env::var("PETZ_DIAG").is_ok();
+    let outline = if diag { DIAG_OUTLINE } else { OUTLINE };
+    let mouth_col = if diag { DIAG_MOUTH } else { MOUTH };
+    let whisker_col = if diag { DIAG_WHISKERS } else { WHISKERS };
 
     let mut events = sdl.event_pump()?;
     let mut paused = false;
@@ -2145,6 +2189,85 @@ fn main() -> Result<(), String> {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- the whiskers: a drawing laid flat over the muzzle ----------------
+        // Flat on purpose, unlike the mouth. Whiskers are thin, straight and their
+        // whole job is to reach past the face; wrapping them round a 13-unit ball
+        // would curl them into the snout. So this is the decal the earlier
+        // versions used: a screen-space box, positioned relative to the muzzle and
+        // slid by the heading, with its ink clipped only by what is in front of it.
+        {
+            let m = creature.muzzle;
+            let mp = &doll.particles[m];
+            let mh = walker.facing.get(m).copied().unwrap_or(heading);
+            let re = (mp.radius * zoom).round().max(1.0);
+            let (cx, cy) = (screen[m].x.round() + 0.5, screen[m].y.round() + 0.5);
+            let de = screen[m].depth;
+            // Every head ball on screen, so a pixel past the snout can ask what is
+            // nearest to it there. Without this the skull - whose near surface is
+            // a few units in front of the muzzle's centre - buries the whiskers
+            // and only the middle of each line survives.
+            let head_geo: Vec<(f32, f32, f32, f32)> = creature
+                .head_balls
+                .iter()
+                .filter_map(|&i| {
+                    let p = doll.particles.get(i)?;
+                    Some((screen[i].x, screen[i].y, p.radius * zoom, screen[i].depth))
+                })
+                .collect();
+            if let Some(ox) = mouth_slide(mh, re) {
+                let full = (walker.whisker_span * zoom).max(1.0);
+                let wide = (full * mh.cos().abs().max(MOUTH_MIN_TURN)).max(1.0);
+                let tall = (full * whiskers.h / whiskers.w).max(1.0);
+                let centre_y = cy + walker.whisker_drop * re;
+                let (left, top) = (cx + ox - wide / 2.0, centre_y - tall / 2.0);
+                let (sx, sy) = (whiskers.w / wide, whiskers.h / tall);
+                let (x0, x1) = (left.floor() as i32, (left + wide).ceil() as i32);
+                let (y0, y1) = (top.floor() as i32, (top + tall).ceil() as i32);
+                for y in y0..y1 {
+                    if y < 0 || y as usize >= H {
+                        continue;
+                    }
+                    for x in x0..x1 {
+                        if x < 0 || x as usize >= W {
+                            continue;
+                        }
+                        let cov = whiskers.sample(
+                            (x as f32 - left) * sx,
+                            (y as f32 - top) * sy,
+                            (x as f32 + 1.0 - left) * sx,
+                            (y as f32 + 1.0 - top) * sy,
+                        );
+                        if cov < MOUTH_INK {
+                            continue;
+                        }
+                        let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                        let dr = (fx - cx).powi(2) + (fy - cy).powi(2);
+                        let z = if dr <= re * re {
+                            // Over the snout: its own surface.
+                            de - (1.0 - dr / (re * re)).max(0.0).sqrt() * re
+                        } else {
+                            // Past the snout: just in front of the nearest head
+                            // ball under this pixel, or the snout's depth if none.
+                            let mut nearest = de;
+                            for &(hx, hy, hr, hd) in &head_geo {
+                                let h2 = (fx - hx).powi(2) + (fy - hy).powi(2);
+                                if h2 <= hr * hr {
+                                    let s = hd - (hr * hr - h2).max(0.0).sqrt();
+                                    if s < nearest {
+                                        nearest = s;
+                                    }
+                                }
+                            }
+                            nearest
+                        } + MOUTH_BIAS;
+                        if depth.test_and_set(x as usize, y as usize, z) {
+                            surface.set(x as usize, y as usize, whisker_col);
                         }
                     }
                 }
@@ -3276,6 +3399,36 @@ mod walk_tests {
         assert!(
             bottom > 1.0,
             "the wrapping stops short of the rim: {bottom} rad"
+        );
+    }
+
+    #[test]
+    fn the_whiskers_reach_past_the_snout_and_clear_the_mouth() {
+        // Whiskers are placed flat, the opposite choice to the mouth: thin straight
+        // lines that would curl if wrapped round a small ball. Three things matter.
+        let re = 6.5f32;
+        let zoom = 0.5;
+        let wide = WHISKER_SPAN * zoom;
+        // 1. They leave the face. A whisker inside the muzzle's silhouette is not a
+        // whisker, so the drawing is wider than the ball by a wide margin.
+        assert!(
+            wide > 4.0 * re,
+            "the whiskers do not reach past the snout: {wide} px wide, snout {} px",
+            2.0 * re
+        );
+        // 2. They sit above the muzzle's centre, which puts the middle line at the
+        // nose's height. Centred, they crossed the mouth and muddied it.
+        assert!(
+            WHISKER_DROP < 0.0,
+            "the whiskers sit on or below the snout's centre"
+        );
+        // 3. The lowest line stays above the bottom of the snout, where the mouth
+        // now is. Both are placed from the same centre, so this needs no render.
+        let whisker_bottom = WHISKER_DROP * re + (wide * 42.0 / 173.0) / 2.0;
+        assert!(
+            whisker_bottom < re,
+            "the whiskers reach the bottom of the snout, into the mouth: \
+             {whisker_bottom} vs rim {re}"
         );
     }
 

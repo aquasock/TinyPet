@@ -501,6 +501,47 @@ distinction cost three attempts.
 What it is not, yet: expression. The mouth is one fixed drawing; the tongue and
 the eyelid states are the rest of the face work.
 
+## The whiskers
+
+A second supplied drawing: six lines, three a side, splaying out from the sides of
+the snout. Same converter, same coverage grid, same sampling.
+
+**Flat, deliberately - the opposite choice to the mouth.** Whiskers are thin,
+straight, and their whole job is to reach past the face. Wrapping them round the
+muzzle's 13-unit sphere would curl them and shorten them, which is the one thing
+they must not do, so this is the flat placement the earlier versions used: a
+screen-space box positioned relative to the muzzle and slid by the heading.
+
+```
+WHISKER_SPAN  62.0  body units wide; 31 px at the default zoom
+WHISKER_DROP  -0.10  above the muzzle's centre, as a fraction of its radius
+WHISKERS      10    the light ramp's near-white
+```
+
+The span is more than twice the muzzle's diameter on purpose. A whisker inside the
+snout's silhouette is not a whisker.
+
+**Depth past the snout comes from the head, not the muzzle.** Where a pixel is
+over the muzzle it takes the muzzle's own surface. Past it - and most of a whisker
+is past it - it takes the *nearest head ball* under that pixel. Without that the
+skull, whose near surface is a few units in front of the muzzle's centre, buries
+the outer half of every line and only the middle survives.
+
+**The colour is not black.** Black is what whiskers are, and black is also the
+coat on this palette, so black whiskers would be drawn and invisible. They take
+the light ramp's near-white instead, which reads on both the black coat and the
+blue snout. Under `PETZ_DIAG` they are yellow (251), so they can be told apart
+from the mouth's green in a dump.
+
+**They sit above the muzzle's centre** - `WHISKER_DROP` is negative - which puts
+the middle line at the nose's height. Placed at the nose's own level the lowest
+line crossed the mouth and both became unreadable. Measured under `PETZ_DIAG`, the
+whiskers' lowest row is 1-2 px above the mouth's highest at 180, 150, 120 and 90
+degrees.
+
+`PETZ_WHISKER` and `PETZ_WHISKER_DROP` set both values headlessly; `P` reports
+them. There are no live keys - the values were judged by rendering and looking.
+
 ## Reference findings worth keeping
 
 From `Resource/Dogz/*.dog` (LNZ resource, `[Ballz Info]`):

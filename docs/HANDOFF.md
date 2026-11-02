@@ -14,14 +14,16 @@ Read this as orientation, not law. Refresh live state (`git status`, `git log`,
   only.
 - **The surface is 320x240**, the animal at half its authored size, in two window
   modes.
-- **The face has a nose and a mouth.** The nose is a pink ball on the snout's
+- **The face has a nose, a mouth and whiskers.** The nose is a pink ball on the snout's
   tip, as it always was. The mouth is a *drawing* mapped onto the muzzle's
   the muzzle's **surface** - every pixel asks where it sits on the sphere and
   looks the drawing up by that angle, so the arms curve round the snout. A
   drawing, not a ball. Its **fork** is anchored just under the nose; anchoring the
   bottom edge cannot survive wrapping, because the rim is where the surface turns
   edge-on. The top 10% of the bitmap is blanked - not cropped - to keep its first
-  rows out of the pink nose.
+  rows out of the pink nose. The whiskers are a second drawing, placed **flat** -
+  the opposite choice - because thin straight lines curl if wrapped on a small
+  ball, and their whole job is to reach past the face.
 - Tree clean, `main` level with `origin/main`. (No SHA here on purpose: the commit
   that adds this note moves it.)
 - A ragdoll may still be running from the owner's session (no dump instrument on
@@ -41,6 +43,11 @@ Exact at placement; 0.31 units stale after a step.
 the tail is a physical thing that trails the body, not an animation played at it.
 Do not rebuild it without asking. `docs/SANDBOX.md` keeps the numbers so it would
 not have to be rediscovered.
+
+**The whiskers are a second drawing**, placed flat on purpose: a screen-space box
+wider than twice the muzzle's diameter, its depth taken from the nearest head ball
+rather than the muzzle so the outer half of each line is not buried by the skull.
+Near-white, because black whiskers on a black coat are not whiskers.
 
 **The mouth, in ten passes, two of them reverted.** A small black circle, a thin line, a curve, a
 flip, a supplied nose-and-whiskers sheet, a supplied mouth drawing, and finally
@@ -75,14 +82,16 @@ holding `K` walked a value to its bound. The text path went when the sway did; t
   nothing driving it.
 - The mouth: `cargo test --workspace` is 72 green. The drawing's own shape is
   judged by eye in the window, not by a pixel count. What the dump does confirm
-  are the placement and the absence of distortion: under `PETZ_DIAG` at 180, 150,
-  120 and 90 degrees the drawing's top row is 1-2 px below the nose's bottom row at
-  every heading, and `the_mouth_is_wrapped_without_being_distorted` pins that the
-  wrapped mouth keeps its approved width, keeps the image's aspect in *angle*, and
-  that the wrap stops short of the rim.
+  are the placement and the absence of distortion. Under `PETZ_DIAG` at 180, 150,
+  120 and 90 degrees the mouth's top row is 1-2 px below the nose's bottom row at
+  every heading, and the whiskers' lowest row is 1-2 px above the mouth's highest.
+  `the_mouth_is_wrapped_without_being_distorted` pins that the wrapped mouth keeps
+  its approved width, keeps the image's aspect in *angle*, and that the wrap stops
+  short of the rim.
   `the_mouth_is_painted_on_the_half_of_the_snout_that_faces_the_viewer` pins the
-  frame, the cull and that a steeper tilt sits lower; `draw_curve_on_sphere`
-  keeps its two core tests even though the face no longer calls it.
+  slide and the cull, and
+  `the_whiskers_reach_past_the_snout_and_clear_the_mouth` pins that the whiskers
+  leave the face and stay out of the mouth.
 - Ball count, from the count test: 48, of which 11 on the head.
 - Hips, measured against a rigid body through a full-rate turn: 0.2-1.1 px, and
   the hip-to-spine gap fixed at its authored 20 units.
